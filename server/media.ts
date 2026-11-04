@@ -221,9 +221,11 @@ export async function exportMedia(body: any, options:{screenshot?:boolean}={}) {
         filters.push(`[${layer}]drawtext=textfile='${i}.txt'${font}:expansion=none:fontsize=${Math.round(height / 24)}:fontcolor=yellow:box=1:boxcolor=black@0.75:boxborderw=8:x=(w-text_w)/2:y=h-text_h-30-${row*Math.round(height/24)*2}:alpha='${alpha}':enable='gte(t,${start})*lt(t,${end})'[${next}]`); layer = next;
       }
     }
-    // Animated captions create many filters; keep them out of Windows' command-line limit.
+    // Load the graph from a file using FFmpeg's current option-file syntax. The
+    // deprecated -filter_complex_script was removed upstream; putting the graph
+    // directly on the command line would exceed Windows' limit on long edits.
     const filterScript=path.join(temp,'filters.ffscript');await fs.writeFile(filterScript,filters.join(';'));
-    args.push('-filter_complex_script', filterScript);
+    args.push('-/filter_complex', filterScript);
     if(still) {
       const codec=({png:'png',jpg:'mjpeg',webp:'libwebp',bmp:'bmp',tiff:'tiff',gif:'gif'} as Record<string,string>)[format];
       args.push('-map',`[${layer}]`,'-frames:v','1','-fps_mode','passthrough','-c:v',codec!,'-threads','2','-an');

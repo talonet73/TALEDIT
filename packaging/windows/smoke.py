@@ -11,6 +11,7 @@ import tempfile
 import time
 import traceback
 import urllib.request
+from ai_cut_smoke import verify_ai_cut
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -77,6 +78,7 @@ def main():
                     time.sleep(.5)
             print('::notice::Installed EXE launch and private FFmpeg health: PASS',flush=True)
             subprocess.run([str(install / 'TALEDIT.exe')],env=env,check=True,timeout=15)
+            verify_ai_cut(install/'tools/ffmpeg.exe',folder)
             fixture = Path(folder) / 'source.mp4'
             subprocess.run([str(install/'tools/ffmpeg.exe'),'-v','error','-y','-f','lavfi','-i','color=c=red:s=160x90:r=25:d=1','-f','lavfi','-i','sine=frequency=440:duration=1','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',str(fixture)],check=True)
             asset = api('/api/upload-media',filename=fixture)['asset']

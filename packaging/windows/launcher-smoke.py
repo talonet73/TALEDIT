@@ -7,6 +7,8 @@ import time
 import traceback
 import urllib.request
 import json
+import tempfile
+from ai_cut_smoke import verify_ai_cut
 
 def main():
     root=Path(sys.argv[1]).resolve()
@@ -26,6 +28,8 @@ def main():
         for attempt in range(3):
             subprocess.run([str(root/'TALEDIT.exe')],env=env,check=True,timeout=15)
         print('::notice::Windows EXE first launch and three duplicate launches: PASS',flush=True)
+        with tempfile.TemporaryDirectory(prefix='taledit AI Cut ') as folder:
+            verify_ai_cut(root/'tools/ffmpeg.exe',folder)
     finally:
         subprocess.run([str(root/'CHIUDI-TALEDIT.exe')],env=env,check=True,timeout=20)
         first.wait(timeout=20)

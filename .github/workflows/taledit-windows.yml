@@ -57,6 +57,8 @@ jobs:
           @"
           Installer unico e completo per Windows 10/11 a 64 bit. Include Python, Node.js, FFmpeg, Whisper small e U2NetP; nessuna preparazione manuale.
 
+          Include la correzione AI Cut per le versioni recenti di FFmpeg: verificati audio WAV di 169,6 secondi e video con pausa da conservare di 0,7 secondi.
+
           Scarica TALEDIT-Setup.exe, aprilo e segui Installa. L'app si apre nel browser. I file personali restano separati dagli aggiornamenti.
 
           Build verificata su Windows: installazione, runtime inclusi, trascrizione reale e timestamp, rimozione sfondo, avvio, importazione, esportazione video/audio, screenshot PNG, interfaccia, chiusura e disinstallazione con conservazione dei dati.

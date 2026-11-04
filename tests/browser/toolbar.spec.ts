@@ -4,9 +4,9 @@ import { execFileSync } from 'node:child_process';
 const tracks=[{id:'t',name:'TESTO',type:'text',headerBg:'#63300d',laneBg:'#301909'},{id:'v',name:'VIDEO',type:'video',headerBg:'#0f2942',laneBg:'#111d2e'},{id:'a',name:'AUDIO',type:'audio',headerBg:'#0d3324',laneBg:'#10251e'},{id:'i',name:'IMMAGINI',type:'image',headerBg:'#382a08',laneBg:'#1a1608'},{id:'fx',name:'EFFECTS',type:'effect',headerBg:'#35121b',laneBg:'#1e141a'}].map(t=>({...t,isMuted:false,isSolo:false}));
 let pattern:any,red:any,blue:any,voice:any,video:any;
 async function state(page:Page){return (await(await page.request.get('/api/editor/state')).json()).state;}
-async function project(page:Page,clips:any[]=[],subtitles:any[]=[]){
+async function project(page:Page,clips:any[]=[],subtitles:any[]=[],extraAssets:any[]=[]){
   await page.goto('/');
-  const data={appName:'TALEDIT',captionWorkflow:'timeline',tracks,clips,mediaAssets:[pattern,red,blue,voice,video],subtitles,markers:[],currentTime:0,aspectRatio:'16:9'};
+  const data={appName:'TALEDIT',captionWorkflow:'timeline',tracks,clips,mediaAssets:[pattern,red,blue,voice,video,...extraAssets],subtitles,markers:[],currentTime:0,aspectRatio:'16:9'};
   await page.locator('input[type=file]').first().setInputFiles({name:'toolbar.tal',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
   await expect.poll(async()=>JSON.stringify((await state(page)).clips)).toBe(JSON.stringify(clips));
 }
@@ -396,4 +396,17 @@ test('playback across many automatic cuts never clears the video to black',async
 });
 test('MCP video transfer appears in the real browser stage and timeline automatically',async({page})=>{
   await project(page,[clip(pattern,'existing',{duration:75})]);await page.request.post('/api/editor/connection',{data:{enabled:true}});const r=await page.request.post('/api/mcp',{headers:{Accept:'application/json, text/event-stream'},data:{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'import_media',arguments:{sourcePath:'/tmp/taledit-toolbar-video.mp4',fileName:'Claude video.mp4'}}}});expect(r.ok()).toBe(true);const rpc=await r.json();expect(rpc.result.isError).not.toBe(true);const payload=JSON.parse(rpc.result.content[0].text);expect(payload.clipIds).toHaveLength(2);expect(payload.state.currentTime).toBe(75);await expect.poll(async()=>(await state(page)).mediaAssets.some((a:any)=>a.name==='Claude video.mp4')).toBe(true);for(const id of payload.clipIds)await expect(page.locator(`[data-clip-id="${id}"]`)).toBeVisible();await expect.poll(async()=>{const d=await rgb(page);return d[0]+d[1]+d[2];}).toBeGreaterThan(20);
+});
+
+
+test('AI Cut completes the reported audio-only 169.6 second case at 0.7 seconds and supports undo',async({page,request})=>{
+  test.setTimeout(120000);const file='/tmp/taledit-audio-169-6.wav';
+  execFileSync('ffmpeg',['-v','error','-y','-f','lavfi','-i','aevalsrc=if(between(t\\,1\\,167.6)\\,0\\,0.1*sin(2*PI*440*t)):s=16000:d=169.6',file]);
+  const response=await request.post('/api/upload-media',{headers:{'Content-Type':'application/octet-stream','x-filename':'Voce con pause.wav'},data:fs.readFileSync(file)});expect(response.ok()).toBe(true);const asset=(await response.json()).asset;
+  const original=clip(asset,'long-audio',{duration:169.6});await project(page,[original],[],[asset]);
+  await page.getByRole('button',{name:'AI Cut',exact:true}).click();const panel=page.getByRole('dialog',{name:'Montaggio intelligente'});await panel.getByRole('slider',{name:'Margine pause'}).fill('0.7');
+  await panel.getByRole('button',{name:'Scansiona e taglia automaticamente',exact:true}).click();await expect(panel).toHaveCount(0,{timeout:60000});
+  await expect.poll(async()=>(await state(page)).clips.length).toBe(2);const edited=(await state(page)).clips.sort((a:any,b:any)=>a.startTime-b.startTime);
+  expect(edited.every((c:any)=>c.type==='audio'&&c.trackId==='a')).toBe(true);expect(edited[0].startTime+edited[0].duration).toBeCloseTo(edited[1].startTime,8);expect(edited[1].startTime+edited[1].duration).toBeCloseTo(3.7,1);
+  await page.getByRole('button',{name:'Indietro',exact:true}).click();await expect.poll(async()=>(await state(page)).clips.length).toBe(1);expect((await state(page)).clips[0].duration).toBe(169.6);
 });
