@@ -1,5 +1,9 @@
 # Verifica installer unico Windows — 31 ottobre 2026
 
+Aggiornamento 4 novembre: disponibile un nuovo installer con la correzione FFmpeg.
+[Download e risultati aggiornati](ffmpeg-ai-cut-compatibility.md).
+Il rapporto sotto conserva i risultati della precedente versione.
+
 Pacchetto: `TALEDIT-Setup.exe`, installazione per utente Windows 10/11 x64.
 Sorgente: [`336592184fc9`](https://github.com/talonet73/MyTalonet/tree/336592184fc93b1680e60c6e77e31143b856bfdf). Esecuzione Windows: [GitHub Actions Windows](https://github.com/talonet73/MyTalonet/actions/runs/41207002977).
 Stato: **PASS** — installer costruito, installato e verificato su Windows;

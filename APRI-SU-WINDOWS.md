@@ -2,8 +2,12 @@
 
 ## Metodo consigliato: un solo file da installare
 
+La versione del 4 novembre corregge l’errore AI Cut “filter_complex_script”.
+Salva il progetto, conserva la vecchia cartella e chiudi anche la vecchia finestra
+nera prima di aprire la versione aggiornata dall’icona sul desktop.
+
 1. Salva il progetto e chiudi TALEDIT e la vecchia finestra nera di avvio.
-2. [Scarica **TALEDIT-Setup.exe**](https://github.com/talonet73/MyTalonet/releases/download/taledit-windows-336592184fc9/TALEDIT-Setup.exe).
+2. [Scarica **TALEDIT-Setup.exe**](https://github.com/talonet73/MyTalonet/releases/download/taledit-windows-254868b1592a/TALEDIT-Setup.exe).
 3. Apri il file e premi **Avanti**, poi **Installa**, quindi **Fine**.
 4. Le volte successive apri **TALEDIT** dall’icona sul desktop.
 
@@ -15,8 +19,8 @@ Conserva la vecchia cartella: se hai progetti già salvati, segui le
 [istruzioni per recuperare i loro file](docs/windows-installer.md#progetti-e-aggiornamenti).
 La nuova installazione e la disinstallazione mantengono separati i dati personali.
 
-La prova completa dell’installer su Windows è riuscita. Sono passati anche 111 test
-dell’app e 34 prove browser su Linux: [risultati e limiti](docs/windows-installer-verification.md).
+La prova completa dell’installer su Windows è riuscita. Sono passati anche 113 test
+dell’app e 35 prove browser su Linux: [risultati e limiti](docs/windows-installer-verification.md).
 
 ## Metodo alternativo: cartella dei sorgenti
 
@@ -37,7 +41,7 @@ Se compare un blocco di sicurezza di Windows, controlla provenienza e messaggio 
 
 Il primo file usa il programma di installazione di Windows per Node.js LTS, Python 3.12, FFmpeg e i componenti Microsoft necessari. Rimangono attive le verifiche normali delle fonti e dei pacchetti. Il secondo installa le versioni dell’app conservate nel progetto, usa PyAV 16.1.0 e salva il modello vocale nella cartella personale di Windows. Prepara anche BG Remover con un ambiente separato e un modello gratuito da circa 4,6 MB. Non serve un abbonamento a servizi di riconoscimento vocale.
 
-L’installer unico è stato costruito e provato realmente su Windows tramite GitHub Actions. La verifica aggiornata comprende anche 111 test principali e 34 prove browser su Linux. Il metodo alternativo descritto qui installa componenti globali con gli script: questa preparazione è distinta dal percorso dell’installer, che contiene già i propri componenti privati.
+L’installer unico è stato costruito e provato realmente su Windows tramite GitHub Actions. La verifica aggiornata comprende anche 113 test principali e 35 prove browser su Linux. Il metodo alternativo descritto qui installa componenti globali con gli script: questa preparazione è distinta dal percorso dell’installer, che contiene già i propri componenti privati.
 
 YouTube diretto rimane soggetto alle restrizioni di rete. Il pulsante **Carica video locale**, presente nella finestra YouTube, consente di importare un file gia sul tuo computer. Nessun blocco viene aggirato.
 

@@ -4,7 +4,11 @@ Editor video locale con React, Express, FFmpeg e strumenti MCP per Claude e Chat
 
 ## Installer unico per Windows
 
-[Scarica **TALEDIT-Setup.exe**](https://github.com/talonet73/MyTalonet/releases/download/taledit-windows-336592184fc9/TALEDIT-Setup.exe) per Windows 10/11 a 64 bit.
+Aggiornamento 4 novembre 2026: corretta l’incompatibilità AI Cut/esportazione con
+le versioni recenti di FFmpeg. Verificato anche WAV da 169,6 secondi con margine
+di 0,7 secondi. [Risultati della correzione](docs/ffmpeg-ai-cut-compatibility.md).
+
+[Scarica **TALEDIT-Setup.exe**](https://github.com/talonet73/MyTalonet/releases/download/taledit-windows-254868b1592a/TALEDIT-Setup.exe) per Windows 10/11 a 64 bit.
 Include Python, Node.js, strumenti video e modelli gratuiti per sottotitoli e rimozione
 sfondo: il primo avvio usa i componenti già inclusi nel pacchetto.
 
@@ -15,7 +19,7 @@ Per fermare anche il programma in background: **Start → TALEDIT → Chiudi TAL
 Installer costruito e provato su Windows: installazione, runtime privati, trascrizione
 reale, rimozione sfondo, avvii ripetuti, importazione, esportazione, screenshot,
 interfaccia browser e disinstallazione con conservazione dei dati. Superati anche
-111 test dell'app e 34 prove browser in produzione su Linux.
+113 test dell'app e 35 prove browser in produzione su Linux.
 [Istruzioni e recupero dei progetti precedenti](docs/windows-installer.md) ·
 [Report delle verifiche e limiti](docs/windows-installer-verification.md).
 

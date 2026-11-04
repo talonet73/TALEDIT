@@ -88,3 +88,13 @@ interfaccia e conservazione dei dati durante la disinstallazione. La versione
 rilasciata ha superato anche 111 test dell’app e 34 prove browser su Linux.
 Il [report dedicato](windows-installer-verification.md) contiene versione, esecuzione
 Windows, hash del download, problemi emersi e correzioni, copertura e limiti.
+
+
+## Aggiornamento 4 novembre 2026 — AI Cut e FFmpeg recente
+
+Corretto il parametro rimosso `-filter_complex_script`, sostituito con la sintassi
+su file `-/filter_complex`. L’errore dello screenshot è stato riprodotto su un
+FFmpeg recente reale. Superati 113 test con FFmpeg 7.1.5, 113 con la build recente
+e 35 prove browser usando quest’ultima; riusciti anche i test Windows prima e
+dopo l’installazione, inclusi WAV 169,6 s, video e margine 0,7 s.
+[Report e installer aggiornato](ffmpeg-ai-cut-compatibility.md).
