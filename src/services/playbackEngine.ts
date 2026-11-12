@@ -96,7 +96,7 @@ export class PlaybackEngine {
     if (!element) {
       element = document.createElement('video');
       element.crossOrigin = 'anonymous'; element.playsInline = true; element.preload = 'auto'; element.muted = true;
-      for (const event of ['loadeddata','seeked','canplay','timeupdate']) element.addEventListener(event, this.notify);
+      for (const event of ['loadeddata','seeked','canplay','timeupdate','error']) element.addEventListener(event, this.notify);
       element.src = url; this.videoCache.set(key, element);
     }
     return element;
@@ -105,7 +105,7 @@ export class PlaybackEngine {
     if(url.startsWith('/media_downloads/'))url='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
     let element = this.audioCache.get(key);
     if (element && element.getAttribute('src') !== url) { element.pause(); element.src = url; }
-    if (!element) { element = new Audio(); element.crossOrigin = 'anonymous'; element.preload = 'auto'; element.src = url; this.audioCache.set(key, element); }
+    if (!element) { element = new Audio(); element.crossOrigin = 'anonymous'; element.preload = 'auto'; element.src = url;for(const event of ['loadeddata','canplay','error'])element.addEventListener(event,this.notify);this.audioCache.set(key, element); }
     return element;
   }
   public getImageElement(url: string) {
@@ -166,10 +166,24 @@ export class PlaybackEngine {
   private async waitFor(element: HTMLMediaElement, event: string, ready: () => boolean) {
     if (ready()) return;
     await new Promise<void>(resolve => {
-      const done = () => { clearTimeout(timer); element.removeEventListener(event, done); element.removeEventListener('error', done); resolve(); };
+      // loadeddata may already have fired before a seek drops readyState. A new
+      // seek completes with seeked/canplay, without another loadeddata event.
+      const events=[...new Set([event,'loadeddata','canplay','seeked','error'])];
+      const done = () => {clearTimeout(timer);for(const name of events)element.removeEventListener(name,check);resolve();};
+      const check = () => {if(ready()||element.error)done();};
       const timer = setTimeout(done, 10000);
-      element.addEventListener(event, done); element.addEventListener('error', done);
+      for(const name of events)element.addEventListener(name,check);
+      check();
     });
+  }
+  public mediaError(clips:{id:string;name:string;type?:string;mediaUrl?:string}[]) {
+    for(const clip of clips){
+      const element=this.videoCache.get(clip.id)||this.audioCache.get(clip.id);
+      if(!element?.error)continue;
+      const reason=element.error.code===2?'Impossibile leggere il file dal server.':element.error.code===3?'Il browser non riesce a decodificare l’anteprima.':element.error.code===4?'Anteprima non supportata o non disponibile.':'Caricamento interrotto.';
+      return `${clip.name}: ${reason} (errore ${element.error.code})`;
+    }
+    return '';
   }
   public async preloadVideos(videos: VideoClipData[]) {
     await Promise.all(videos.filter(c => c.mediaUrl).map(c => { const element = this.getVideoElement(c.mediaUrl!, c.id); return this.waitFor(element, 'loadeddata', () => element.readyState >= 2 || Boolean(element.error)); }));

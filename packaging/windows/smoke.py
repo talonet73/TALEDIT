@@ -94,6 +94,8 @@ def main():
             assert snapshot['savedToDownloads'], snapshot
             # Exercise the installed production UI, not a development web server.
             subprocess.run(['node', str(ROOT/'packaging/windows/browser-smoke.mjs')],cwd=ROOT,check=True,timeout=90)
+            playback_env = {**os.environ, 'PATH': str(install/'tools') + os.pathsep + os.environ['PATH']}
+            subprocess.run(['npx.cmd', 'playwright', 'test', '--config', 'playwright.installed.config.ts'], cwd=ROOT, env=playback_env, check=True, timeout=1200)
             print('::notice::Duplicate launch, import, real MP4 export, PNG Downloads and browser UI: PASS',flush=True)
             marker=media/'installer-preserve-test.txt'
             marker.write_text('preserve user data')

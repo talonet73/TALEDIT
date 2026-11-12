@@ -44,9 +44,16 @@ jobs:
       - name: Compress single installer after launcher checks pass
         shell: pwsh
         run: python packaging/windows/build.py --installer-only --makensis "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-      - run: npx playwright install chromium
+      - run: npx playwright install chromium chrome msedge
       - name: Test actual installer and installed application on Windows
         run: python packaging/windows/smoke.py build/windows/TALEDIT-Setup.exe build/windows/payload.sha256.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TALEDIT-installed-player-tests
+          path: |
+            playwright-report/
+            test-results/
       - uses: actions/upload-artifact@v4
         with:
           name: TALEDIT-Windows-verified

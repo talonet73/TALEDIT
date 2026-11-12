@@ -47,6 +47,7 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
 }) => {
   const [menuOpen,setMenuOpen]=useState(false);
   const [playerError,setPlayerError]=useState('');
+  const [mediaError,setMediaError]=useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const screenRef=useRef<HTMLDivElement>(null);
@@ -127,6 +128,7 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
   // Re-render when frames are ready from video elements
   useEffect(() => {
     playbackEngine.setOnFrameReady(() => {
+      setMediaError(playbackEngine.mediaError(clips.filter(c=>currentTime>=c.startTime&&currentTime<c.startTime+c.duration)));
       if (canvasRef.current) {
         playbackEngine.renderFrame(canvasRef.current, currentTime, videoClips, effectClips, imageClips, subtitles);
       }
@@ -138,6 +140,7 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
   useEffect(() => {
     let cancelled=false;
     playbackEngine.syncMedia(currentTime, isPlaying, videoClips, audioClips, isMuted, tracks,audioMaster);
+    setMediaError(playbackEngine.mediaError(clips.filter(c=>currentTime>=c.startTime&&currentTime<c.startTime+c.duration)));
     const canvas=canvasRef.current;
     if(canvas){
       if(isPlaying)playbackEngine.renderFrame(canvas,currentTime,videoClips,effectClips,imageClips,subtitles);
@@ -185,6 +188,7 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
         <div className="relative"><button aria-label="Opzioni player" aria-expanded={menuOpen} onClick={()=>setMenuOpen(p=>!p)}><Menu className="w-3.5 h-3.5"/></button>{menuOpen && <div className="absolute right-0 top-5 z-20 bg-slate-800 border border-slate-600 rounded w-44 p-2 space-y-2"><button className="block" onClick={()=>{onSeek(0);setMenuOpen(false);}}>Vai all’inizio</button><button className="block" onClick={()=>{void toggleFullscreen();setMenuOpen(false);}}>Apri schermo intero</button></div>}</div>
       </div>
 
+      {mediaError && <p role="alert" className="text-xs text-rose-300 p-2">{mediaError}</p>}
       {playerError && <button role="alert" onClick={()=>setPlayerError('')} className="text-xs text-rose-300 p-2">{playerError}</button>}
       {penActive&&<>{selectedClip&&['video','image'].includes(selectedClip.type)&&onUpdateMask?<PenMaskControls mask={selectedClip.mask} onUpdate={onUpdateMask}/>:<p className="p-2 text-xs text-amber-200">Seleziona una clip video o immagine prima di usare la penna.</p>}</>}
       {/* Video Screen Area */}
