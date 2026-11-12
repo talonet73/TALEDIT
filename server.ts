@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import {receiveMedia,preparePreview} from './server/importMedia';
+import {receiveMedia,preparePreview,previewStatus,cancelPreview,retryPreview} from './server/importMedia';
 import {saveScreenshotToDownloads} from './server/screenshot';
 import express from 'express';
 import path from 'node:path';
@@ -28,6 +28,10 @@ export async function createApp(production = process.env.NODE_ENV === 'productio
     try { const asset=await receiveMedia(req);res.json({success:true,asset,url:asset.fileUrl}); }
     catch(error){next(error);}
   });
+  function previewFile(name:string){if(name!==path.basename(name)||/[\\\x00-\x1f]/.test(name)||name.startsWith('.'))throw new InputError('Percorso media non valido.');return path.join(downloadsDir,name);}
+  app.get('/api/media-preview/:filename/status',(req,res,next)=>{try{res.json(previewStatus(previewFile(req.params.filename)));}catch(error){next(error);}});
+  app.post('/api/media-preview/:filename/cancel',(req,res,next)=>{try{res.json(cancelPreview(previewFile(req.params.filename)));}catch(error){next(error);}});
+  app.post('/api/media-preview/:filename/retry',async(req,res,next)=>{try{await retryPreview(previewFile(req.params.filename));res.json({success:true});}catch(error){next(error);}});
   app.get('/api/media-preview/:filename', async (req,res,next)=>{
     try {
       const name=req.params.filename;

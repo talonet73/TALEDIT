@@ -1,3 +1,4 @@
+import {MediaPreviewStatus} from './MediaPreviewStatus';
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Search, Music, Film, Image as ImageIcon, Trash2, Layers, CheckCircle2, Youtube } from 'lucide-react';
 import { MediaAsset } from '../types/editor';
@@ -62,7 +63,7 @@ export const MediaLibraryPanel: React.FC<MediaLibraryPanelProps> = ({
     e.target.value = '';
     setImporting(true); setImportNotice(null);
     try {
-      for (const file of files) { setImportProgress(`${file.name}: 0%`);onAddAsset(await importMediaFile(file,percent=>setImportProgress(percent===100?`${file.name}: analisi e preparazione anteprima…`:`${file.name}: ${percent}%`))); onCustomFileImported(file); }
+      for (const file of files) { setImportProgress(`${file.name}: 0%`);onAddAsset(await importMediaFile(file,percent=>setImportProgress(percent===100?`${file.name}: analisi del file…`:`${file.name}: ${percent}%`))); onCustomFileImported(file); }
     } catch (error) { setImportNotice((error as Error).message); }
     finally { setImporting(false); }
   };
@@ -294,6 +295,7 @@ export const MediaLibraryPanel: React.FC<MediaLibraryPanelProps> = ({
                       </button>
                     )}
                   </div>
+                  <MediaPreviewStatus asset={item}/>
                 </div>
               );
             })}

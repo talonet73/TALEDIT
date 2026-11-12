@@ -9,7 +9,12 @@ codec non decodificabili non diventano automaticamente supportati.
 Il caricamento scrive direttamente su disco con backpressure, senza il precedente
 buffer in RAM e limite di 500 MB. Il browser invia il File senza conversione
 base64/ArrayBuffer. Sono visibili nome, percentuale di trasferimento e fase di
-preparazione. Gli upload non hanno il timeout di cinque minuti del server Node.
+analisi. Dopo l’analisi il file appare subito nello stage. L’anteprima viene
+preparata in background: nella scheda compaiono percentuale reale, tempo residuo
+stimato, annullamento e possibilità di riprovare. Annullare conserva l’originale.
+Al massimo due anteprime vengono convertite contemporaneamente; le altre sono
+in coda. Le anteprime usano un preset veloce, quattro thread e scartano i frame
+superflui prima del ridimensionamento. Gli upload non hanno il timeout di cinque minuti del server Node.
 Serve spazio per una copia dell'originale e per l'eventuale anteprima. Una
 connessione interrotta richiede una nuova importazione; non c'è ripresa parziale.
 
@@ -50,3 +55,9 @@ prova standard sopra 500 MB su Windows prima della pubblicazione.
   tramite la rete cloud (403); non riguarda il trasferimento dei media.
 - I risultati Windows dell'installer nuovo vanno controllati nella relativa
   esecuzione GitHub Actions; i test Linux non attestano la pubblicazione.
+
+La regressione sull’attesa di importazione usa una ripresa reale da due minuti:
+il server restituisce l’asset mentre FFmpeg sta ancora lavorando. I test verificano
+progresso misurato, annullamento del processo, ripresa, limite di concorrenza e
+conservazione dei file. Nel browser la scheda appare prima della conversione;
+Annulla e Prepara anteprima funzionano anche dopo un tentativo nel Player.

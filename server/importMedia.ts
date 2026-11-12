@@ -4,8 +4,9 @@ import {pipeline} from 'node:stream/promises';
 import {Transform} from 'node:stream';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {spawn,type ChildProcess} from 'node:child_process';
 import type {Request} from 'express';
-import {downloadsDir,describeMedia,InputError,probe,run} from './media';
+import {downloadsDir,describeMedia,InputError,probe} from './media';
 
 // Keep memory bounded by stream buffers, independently of the source size.
 export async function receiveMedia(req:Request) {
@@ -23,7 +24,7 @@ export async function receiveMedia(req:Request) {
     await pipeline(req,count,createWriteStream(file,{flags:'wx'}));
     if(!received)throw new InputError('File vuoto.');
     const asset=await describeMedia(file,name);
-    await preparePreview(file);
+    void preparePreview(file).catch(()=>{});
     return asset;
   } catch(error) {
     await fs.rm(file,{force:true});
@@ -33,14 +34,37 @@ export async function receiveMedia(req:Request) {
   }
 }
 function previewPath(file:string){return `${file}.preview.mp4`;}
-const preparing=new Map<string,Promise<string>>();
+interface PreviewJob {status:'preparing'|'ready'|'error'|'cancelled';percent:number;seconds:number;totalSeconds:number;speed:string;phase:'queued'|'encoding';error?:string;child?:ChildProcess;promise?:Promise<string>}
+const preparing=new Map<string,PreviewJob>();
+export function previewStatus(file:string){const job=preparing.get(file);return job?{status:job.status,percent:job.percent,seconds:job.seconds,totalSeconds:job.totalSeconds,speed:job.speed,phase:job.phase,error:job.error}:{status:'not_started'};}
+export function cancelPreview(file:string){const job=preparing.get(file);if(job?.status==='preparing'){job.status='cancelled';job.child?.kill('SIGKILL');wakeWaiters();}return previewStatus(file);}
+export async function retryPreview(file:string){const job=preparing.get(file);if(job?.status==='preparing')return;await job?.promise?.catch(()=>{});preparing.delete(file);void preparePreview(file).catch(()=>{});}
+function checkCancelled(job:PreviewJob){if(job.status==='cancelled')throw new InputError('Preparazione anteprima annullata.');}
+let running=0;const waiters=new Set<()=>void>();
+function wakeWaiters(){const pending=[...waiters];waiters.clear();for(const resolve of pending)resolve();}
+async function convert(file:string,args:string[],job:PreviewJob){
+ while(running>=2){checkCancelled(job);await new Promise<void>(resolve=>waiters.add(resolve));}
+ checkCancelled(job);running++;job.phase='encoding';
+ try{return await convertRunning(file,args,job);}finally{running--;wakeWaiters();}
+}
+function convertRunning(file:string,args:string[],job:PreviewJob){return new Promise<void>((resolve,reject)=>{
+ if(job.status==='cancelled'){reject(new InputError('Preparazione anteprima annullata.'));return;}
+ const child=spawn('ffmpeg',args,{windowsHide:true});job.child=child;let progress='',errors='';
+ const timer=setTimeout(()=>{child.kill('SIGKILL');reject(new Error('Tempo massimo di preparazione anteprima superato.'));},24*60*60*1000);timer.unref();
+ child.stdout!.on('data',data=>{progress+=data.toString();const lines=progress.split('\n');progress=lines.pop()!;for(const line of lines){const [key,value]=line.trim().split('=');if(key==='out_time_us'){job.seconds=Math.max(0,Number(value)/1e6);job.percent=job.totalSeconds?Math.min(99,Math.floor(job.seconds/job.totalSeconds*100)):0;}if(key==='speed')job.speed=value;}});
+ child.stderr!.on('data',data=>{errors=(errors+data.toString()).slice(-8000);});
+ child.once('error',error=>{clearTimeout(timer);reject(error);});
+ child.once('close',code=>{clearTimeout(timer);job.child=undefined;if(job.status==='cancelled')reject(new InputError('Preparazione anteprima annullata.'));else if(code===0)resolve();else reject(new Error(errors||`FFmpeg: uscita ${code}`));});
+});}
 // Share generation across concurrent audio/video elements. Never replace the original.
 export async function preparePreview(file:string):Promise<string> {
-  const existing=preparing.get(file);if(existing)return existing;
+  const existing=preparing.get(file);if(existing)return existing.promise!;
+  const job:PreviewJob={status:'preparing',percent:0,seconds:0,totalSeconds:0,speed:'',phase:'queued'};preparing.set(file,job);
   const pending=(async()=>{
     const output=previewPath(file);
     try {await fs.access(output);return output;}catch{/* First import. */}
-    const info=await probe(file);
+    const info=await probe(file);job.totalSeconds=Number(info.format.duration)||0;
+    checkCancelled(job);
     const video=info.streams.find((s:any)=>s.codec_type==='video'&& !s.disposition?.attached_pic);
     const audio=info.streams.find((s:any)=>s.codec_type==='audio');
     const ext=path.extname(file).toLowerCase();
@@ -53,10 +77,11 @@ export async function preparePreview(file:string):Promise<string> {
     if(!video&&['.mp3','.m4a','.wav','.ogg','.webm'].includes(ext)&&['mp3','aac','pcm_s16le','pcm_s24le','vorbis','opus'].includes(audio?.codec_name))return file;
     const temp=path.join(downloadsDir,`preview_${randomUUID()}.mp4`);
     try {
-      await run('ffmpeg',['-hide_banner','-loglevel','error','-y','-i',file,...(video?['-map','0:v:0','-vf',"scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=30",'-c:v','libx264','-preset','veryfast','-crf','23','-pix_fmt','yuv420p','-threads','2']:['-vn']),'-map','0:a:0?','-c:a','aac','-b:a','160k','-movflags','+faststart',temp],24*60*60*1000);
+      await convert(file,['-hide_banner','-loglevel','error','-nostats','-progress','pipe:1','-y','-threads','4','-i',file,...(video?['-map','0:v:0','-vf',"fps=30,scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",'-c:v','libx264','-preset','ultrafast','-crf','23','-pix_fmt','yuv420p','-threads','4']:['-vn']),'-map','0:a:0?','-c:a','aac','-b:a','160k','-movflags','+faststart',temp],job);
+      checkCancelled(job);
       await fs.rename(temp,output);return output;
     }finally{await fs.rm(temp,{force:true});}
   })();
-  preparing.set(file,pending);
-  try{return await pending;}finally{preparing.delete(file);}
+  job.promise=pending;
+  try{const result=await pending;job.status='ready';job.percent=100;return result;}catch(error){if(job.status!=='cancelled'){job.status='error';job.error=(error as Error).message;}throw error;}
 }

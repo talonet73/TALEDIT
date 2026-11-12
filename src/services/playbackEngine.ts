@@ -84,6 +84,11 @@ export class PlaybackEngine {
   private onFrameReady: (() => void) | null = null;
   private notify = () => this.onFrameReady?.();
   public setOnFrameReady(callback: (() => void) | null) { this.onFrameReady = callback; }
+  public refreshMedia(url:string) {
+    const preview='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
+    for(const element of [...this.videoCache.values(),...this.audioCache.values()])if(element.getAttribute('src')===preview&&element.error)element.load();
+    this.notify();
+  }
   public getVideoElement(url: string, key = url) {
     if(url.startsWith('/media_downloads/'))url='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
     let element = this.videoCache.get(key);

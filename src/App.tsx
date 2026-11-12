@@ -425,7 +425,7 @@ export default function App() {
     try {
       for (const file of files) {
         setMediaImportProgress(`${file.name}: 0%`);
-        const asset = await importMediaFile(file,percent=>setMediaImportProgress(percent===100?`${file.name}: analisi e preparazione anteprima…`:`${file.name}: ${percent}%`));
+        const asset = await importMediaFile(file,percent=>setMediaImportProgress(percent===100?`${file.name}: analisi del file…`:`${file.name}: ${percent}%`));
         setMediaAssets(prev => [...prev, asset]);
       }
     } catch (error) { setTrackConstraintWarning((error as Error).message); }
