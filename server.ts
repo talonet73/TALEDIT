@@ -1,11 +1,11 @@
 import 'dotenv/config';
+import {receiveMedia,preparePreview} from './server/importMedia';
 import {saveScreenshotToDownloads} from './server/screenshot';
 import express from 'express';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
 import { isServerEntry } from './server/entrypoint';
-import { downloadsDir, describeMedia, exportMedia, InputError, run } from './server/media';
+import { downloadsDir, exportMedia, InputError, run } from './server/media';
 import { installMcp } from './server/mcp';
 import { installCaptions } from './server/captions';
 import { jobs, startYoutubeDownload } from './server/youtube';
@@ -22,17 +22,19 @@ export async function createApp(production = process.env.NODE_ENV === 'productio
     next();
   });
   // Uploads must precede JSON middleware: even JSON-looking files are handled as bytes.
-  app.post('/api/upload-media', express.raw({ type: () => true, limit: '500mb' }), async (req, res, next) => {
-    let file: string | undefined;
+  app.post('/api/upload-media', async (req, res, next) => {
+    // Large local camera originals must not hit the JSON/body-parser memory limit.
+    req.setTimeout(0);
+    try { const asset=await receiveMedia(req);res.json({success:true,asset,url:asset.fileUrl}); }
+    catch(error){next(error);}
+  });
+  app.get('/api/media-preview/:filename', async (req,res,next)=>{
     try {
-      const name = decodeURIComponent(req.get('x-filename') || 'media.mp4');
-      const ext = path.extname(name).toLowerCase();
-      if (!['.mp4','.mov','.avi','.mkv','.webm','.mp3','.wav','.m4a','.ogg','.png','.jpg','.jpeg','.webp'].includes(ext) || !Buffer.isBuffer(req.body) || !req.body.length) throw new InputError('File vuoto o formato non supportato.');
-      file = path.join(downloadsDir, `upload_${randomUUID()}${ext}`);
-      await fs.writeFile(file, req.body, { flag: 'wx' });
-      const asset = await describeMedia(file, path.basename(name));
-      res.json({ success: true, asset, url: asset.fileUrl });
-    } catch (error) { if (file) await fs.rm(file, { force: true }); next(error); }
+      const name=req.params.filename;
+      if(name!==path.basename(name)||/[\\\x00-\x1f]/.test(name)||name.startsWith('.'))throw new InputError('Percorso media non valido.');
+      const file=await preparePreview(path.join(downloadsDir,name));
+      res.sendFile(file,error=>{if(error&&!res.headersSent)next(error);});
+    }catch(error){next(error);}
   });
   app.use(express.json({ limit: '5mb' }));
   app.get('/api/health', async (_req, res) => {
@@ -80,5 +82,5 @@ export async function createApp(production = process.env.NODE_ENV === 'productio
   return app;
 }
 if (isServerEntry(import.meta.url)) {
-  createApp().then(app => app.listen(Number(process.env.PORT || 3000), process.env.HOST || '0.0.0.0', () => console.log('[TALEDIT] Server avviato sulla porta', process.env.PORT || 3000))).catch(error => { console.error(error); process.exitCode = 1; });
+  createApp().then(app => {const server=app.listen(Number(process.env.PORT || 3000), process.env.HOST || '0.0.0.0', () => console.log('[TALEDIT] Server avviato sulla porta', process.env.PORT || 3000));server.requestTimeout=0;return server;}).catch(error => { console.error(error); process.exitCode = 1; });
 }

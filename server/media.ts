@@ -36,7 +36,7 @@ export function localMediaPath(url: string) {
 export async function describeMedia(file: string, name: string):Promise<MediaAsset> {
   let info;
   try { info = await probe(file); } catch { throw new InputError('File multimediale non leggibile o danneggiato.'); }
-  const video = info.streams.find((s: any) => s.codec_type === 'video');
+  const video = info.streams.find((s: any) => s.codec_type === 'video' && !s.disposition?.attached_pic);
   const audio = info.streams.find((s: any) => s.codec_type === 'audio');
   const image = /\.(png|jpe?g|webp)$/i.test(file);
   if (!video && !audio) throw new InputError('Il file non contiene audio o video leggibile.');

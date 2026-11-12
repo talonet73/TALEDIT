@@ -56,12 +56,13 @@ export const MediaLibraryPanel: React.FC<MediaLibraryPanelProps> = ({
 
   const [youtubeOpen, setYoutubeOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importProgress,setImportProgress]=useState('');
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     setImporting(true); setImportNotice(null);
     try {
-      for (const file of files) { onAddAsset(await importMediaFile(file)); onCustomFileImported(file); }
+      for (const file of files) { setImportProgress(`${file.name}: 0%`);onAddAsset(await importMediaFile(file,percent=>setImportProgress(percent===100?`${file.name}: analisi e preparazione anteprima…`:`${file.name}: ${percent}%`))); onCustomFileImported(file); }
     } catch (error) { setImportNotice((error as Error).message); }
     finally { setImporting(false); }
   };
@@ -72,7 +73,7 @@ export const MediaLibraryPanel: React.FC<MediaLibraryPanelProps> = ({
       if (selectedAssetId && ['Delete', 'Backspace'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); handleDeleteAsset(selectedAssetId); }
     }} className="outline-none flex flex-col h-full bg-[#121622] border-r border-[#1e293b] text-white p-3 select-none">
       {youtubeOpen && <YouTubeDialog onClose={() => setYoutubeOpen(false)} onImported={onAddAsset} />}
-      {importing && <p role="status" className="text-xs text-cyan-300">Caricamento media…</p>}
+      {importing && <p role="status" className="text-xs text-cyan-300">{importProgress || 'Caricamento media…'}</p>}
       {/* Stage Files Title & Counter */}
       <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-[#1c2438]">
         <div className="flex items-center gap-1.5">
@@ -104,7 +105,6 @@ export const MediaLibraryPanel: React.FC<MediaLibraryPanelProps> = ({
         <input
           ref={fileInputRef}
           type="file"
-          accept="video/*,audio/*,image/png,image/jpeg,image/webp,.mkv"
           multiple
           className="hidden"
           onChange={handleFileChange}

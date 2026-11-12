@@ -417,15 +417,19 @@ export default function App() {
     e.target.value = '';
   };
 
-  // Import Media Files into Stage (.mp4, .mov, .avi, .mp3, .wav, .png, .jpg)
+  const [mediaImportProgress,setMediaImportProgress]=useState<string | null>(null);
+  // Import files supported by the installed FFmpeg decoders.
   const handleMediaFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []); e.target.value = '';
+    if(mediaImportProgress)return;
     try {
       for (const file of files) {
-        const asset = await importMediaFile(file);
+        setMediaImportProgress(`${file.name}: 0%`);
+        const asset = await importMediaFile(file,percent=>setMediaImportProgress(percent===100?`${file.name}: analisi e preparazione anteprima…`:`${file.name}: ${percent}%`));
         setMediaAssets(prev => [...prev, asset]);
       }
     } catch (error) { setTrackConstraintWarning((error as Error).message); }
+    finally {setMediaImportProgress(null);}
   };
 
   // Delete Track and its clips
@@ -906,6 +910,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#090d16] text-[#e2e8f0] font-sans antialiased select-none">
+      {mediaImportProgress && <p role="status" className="fixed top-16 right-4 z-[100] rounded bg-slate-800 p-3 text-sm text-cyan-200">{mediaImportProgress}</p>}
       {/* Hidden file input for opening .tal projects */}
       <input
         ref={talFileInputRef}
@@ -919,7 +924,6 @@ export default function App() {
       <input
         ref={mediaFileInputRef}
         type="file"
-        accept="video/*,audio/*,image/png,image/jpeg,image/webp,.mkv"
         multiple
         onChange={handleMediaFileImport}
         className="hidden"

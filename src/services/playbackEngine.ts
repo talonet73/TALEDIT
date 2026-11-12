@@ -85,6 +85,7 @@ export class PlaybackEngine {
   private notify = () => this.onFrameReady?.();
   public setOnFrameReady(callback: (() => void) | null) { this.onFrameReady = callback; }
   public getVideoElement(url: string, key = url) {
+    if(url.startsWith('/media_downloads/'))url='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
     let element = this.videoCache.get(key);
     if (element && element.getAttribute('src') !== url) { element.pause(); element.src = url; }
     if (!element) {
@@ -96,6 +97,7 @@ export class PlaybackEngine {
     return element;
   }
   public getAudioElement(url: string, key = url) {
+    if(url.startsWith('/media_downloads/'))url='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
     let element = this.audioCache.get(key);
     if (element && element.getAttribute('src') !== url) { element.pause(); element.src = url; }
     if (!element) { element = new Audio(); element.crossOrigin = 'anonymous'; element.preload = 'auto'; element.src = url; this.audioCache.set(key, element); }

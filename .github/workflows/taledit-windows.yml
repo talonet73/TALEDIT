@@ -33,6 +33,12 @@ jobs:
       - name: Prepare complete offline payload
         shell: pwsh
         run: python packaging/windows/build.py --payload-only --makensis "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+      - name: Verify large MOV import and non-MP4 codecs on Windows
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd\build\windows\payload\tools;" + $env:PATH
+          npx tsx --test tests/large-import.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify Windows launch and duplicate launch before compression
         run: python packaging/windows/launcher-smoke.py build/windows/payload
       - name: Compress single installer after launcher checks pass
@@ -57,7 +63,7 @@ jobs:
           @"
           Installer unico e completo per Windows 10/11 a 64 bit. Include Python, Node.js, FFmpeg, Whisper small e U2NetP; nessuna preparazione manuale.
 
-          Include la correzione AI Cut per le versioni recenti di FFmpeg: verificati audio WAV di 169,6 secondi e video con pausa da conservare di 0,7 secondi.
+          Include importazione su disco senza limite applicativo di 500 MB, formati rilevati da FFmpeg e anteprime compatibili senza alterare gli originali. Verificato MOV 4K/60fps sopra 500 MB su Windows. Include anche la correzione AI Cut per FFmpeg recente.
 
           Scarica TALEDIT-Setup.exe, aprilo e segui Installa. L'app si apre nel browser. I file personali restano separati dagli aggiornamenti.
 
