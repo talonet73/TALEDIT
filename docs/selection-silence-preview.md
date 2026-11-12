@@ -65,7 +65,10 @@ Il gestore precedente duplicato, che limitava il valore a 60, è stato rimosso.
 - Browser: rettangolo di selezione, Ctrl+clic, menu contestuale, unione/Undo,
   salvataggio/riapertura TAL, Ctrl+rotella con tasto destro, flag AI Cut.
 - Browser: risposta AVC deliberatamente non decodificabile, riparazione WebM,
-  fotogramma visibile e PCM reale del Player, download diagnostico.
+  fotogramma visibile e PCM reale del Player, download diagnostico. Verificata anche
+  una copia realmente nera e silenziosa senza errori del decoder: riparazione,
+  aggiornamento dei decoder e recupero del suono. La posizione di riproduzione
+  viene mantenuta dopo il cambio di anteprima.
 
 I nuovi casi API vengono eseguiti su Windows prima della compressione. I casi
 browser entrano nei controlli dell'app effettivamente installata in Chrome ed Edge,

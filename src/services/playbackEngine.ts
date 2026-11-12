@@ -85,12 +85,13 @@ export class PlaybackEngine {
   private notify = () => this.onFrameReady?.();
   public setOnFrameReady(callback: (() => void) | null) { this.onFrameReady = callback; }
   private mediaRevision=new Map<string,number>();
+  private desiredTime=new WeakMap<HTMLMediaElement,number>();
   private previewUrl(url:string){if(!url.startsWith('/media_downloads/'))return url;return '/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length))+(this.mediaRevision.has(url)?`?v=${this.mediaRevision.get(url)}`:'');}
   public diagnostics(url:string){const base='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));const collect=(cache:Map<string,HTMLMediaElement>)=>[...cache.entries()].filter(([,e])=>e.getAttribute('src')?.split('?')[0]===base).map(([id,e])=>({id,source:e.currentSrc,currentTime:e.currentTime,duration:e.duration,readyState:e.readyState,seeking:e.seeking,paused:e.paused,muted:e.muted,volume:e.volume,playbackRate:e.playbackRate,width:e instanceof HTMLVideoElement?e.videoWidth:undefined,height:e instanceof HTMLVideoElement?e.videoHeight:undefined,error:e.error?{code:e.error.code,message:e.error.message}:null}));return {video:collect(this.videoCache),audio:collect(this.audioCache),audioContext:this.audioContext?.state||'not_started',master:this.audioLevel('master')};}
   public refreshMedia(url:string,force=false) {
     const base='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
     const affected=[...this.videoCache.values(),...this.audioCache.values()].filter(e=>e.getAttribute('src')?.split('?')[0]===base);
-    if(force||affected.some(e=>e.error)){this.mediaRevision.set(url,(this.mediaRevision.get(url)||0)+1);for(const element of affected){element.src=this.previewUrl(url);element.load();}}
+    if(force||affected.some(e=>e.error)){this.mediaRevision.set(url,(this.mediaRevision.get(url)||0)+1);for(const element of affected){const position=this.desiredTime.get(element)??element.currentTime;element.addEventListener('loadedmetadata',()=>{if(Number.isFinite(position))element.currentTime=Math.max(0,Math.min(position,element.duration-.001));},{once:true});element.src=this.previewUrl(url);element.load();}}
     this.notify();
   }
   public getVideoElement(url: string, key = url) {
@@ -147,6 +148,7 @@ export class PlaybackEngine {
     if(playing)this.warmMedia(time,videos,audios);
     const videoIds = new Set<string>(), audioIds = new Set<string>();
     const sync = (element: HTMLMediaElement, target: number,rate:number) => {
+      this.desiredTime.set(element,target);
       element.playbackRate=rate;element.preservesPitch=true;
       if (Number.isFinite(element.duration) && target >= element.duration) { element.pause(); return; }
       if (!element.seeking && Math.abs(element.currentTime - target) > (playing ? .15 : .015)) element.currentTime = target;
@@ -199,6 +201,7 @@ export class PlaybackEngine {
     await Promise.all(active.filter(c => c.mediaUrl).map(async c => {
       if(!shouldRender())return;
       const element = this.getVideoElement(c.mediaUrl!, c.id);
+      this.desiredTime.set(element,Math.max(0,sourceTime(c,time)));
       const target = Math.min(Math.max(0, element.duration - .001), sourceTime(c,time));
       if (Number.isFinite(target) && Math.abs(element.currentTime - target) > .015) { element.currentTime = target; await this.waitFor(element, 'seeked', () => !element.seeking); }
     }));
