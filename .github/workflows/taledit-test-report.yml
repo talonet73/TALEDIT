@@ -25,10 +25,15 @@ jobs:
         shell: python
         run: |
           import base64, io, json, os, pathlib, re, zipfile
+          import sys, traceback
+          def failure(kind, error, tb):
+              detail = ''.join(traceback.format_exception(kind, error, tb))
+              print('::error::' + detail.replace('%', '%25').replace('\n', '%0A'), flush=True)
+          sys.excepthook = failure
           root = pathlib.Path('report')
           index = next(root.rglob('index.html'))
           content = index.read_text(encoding='utf-8')
-          encoded = re.search(r'base64,([A-Za-z0-9+/=]+)', content)
+          encoded = re.search(r'data:application/zip;base64,([A-Za-z0-9+/=]+)', content)
           assert encoded, 'Embedded Playwright report not found'
           archive = zipfile.ZipFile(io.BytesIO(base64.b64decode(encoded.group(1))))
           def annotate(value):
