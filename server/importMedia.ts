@@ -83,6 +83,7 @@ export async function preparePreview(file:string,repair=false):Promise<string> {
       await convert(file,['-hide_banner','-loglevel','error','-nostats','-progress','pipe:1','-y','-threads','4','-i',input,...(video?['-map',input===file?`0:${video.index}`:'0:v:0','-vf',"fps=30,scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",'-c:v',repair?'libvpx':'libx264',...(repair?['-deadline','realtime','-cpu-used','8','-b:v','2500k']:['-preset','ultrafast','-crf','23']),'-pix_fmt','yuv420p','-threads','4']:['-vn']),'-map','0:a:0?','-c:a',repair?'libopus':'aac','-ac','2','-ar','48000','-b:a','160k',...(repair?[]:['-movflags','+faststart']),temp],job);
       checkCancelled(job);
       await validatePreview(temp,!!video,!!audio);
+      checkCancelled(job);
       await fs.rename(temp,output);return output;
     }finally{await fs.rm(temp,{force:true});}
   })();
