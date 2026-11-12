@@ -83,3 +83,14 @@ test('upload returns before a real long preview finishes; progress, cancellation
  await Promise.all(urls.map(async u=>{const r=await fetch(u);assert.equal(r.status,400);await r.json();}));
  for(const asset of batch)assert.ok((await fs.stat(path.join(folder,path.basename(asset.fileUrl)))).size>0);
 });
+
+test('low frame rate MOV preview preserves frame count instead of duplicating to 30 fps',async()=>{
+ const source=path.join(folder,'sparse.mov');
+ await exec('ffmpeg',['-v','error','-y','-f','lavfi','-i','testsrc2=s=160x90:r=1:d=12','-c:v','libx264','-preset','ultrafast','-threads','2','-pix_fmt','yuv420p',source]);
+ const asset=await upload('sparse.mov',await fs.readFile(source));
+ const response=await fetch(base+'/api/media-preview/'+path.basename(asset.fileUrl));assert.equal(response.status,200);await response.arrayBuffer();
+ const proxy=path.join(folder,path.basename(asset.fileUrl))+'.preview.mp4';
+ const info=JSON.parse((await exec('ffprobe',['-v','error','-show_streams','-of','json',proxy])).stdout);
+ assert.equal(info.streams[0].avg_frame_rate,'1/1');assert.equal(Number(info.streams[0].nb_frames),12);
+ assert.equal(Number(info.streams[0].duration),12);
+});

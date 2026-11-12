@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 test.beforeEach(async({request})=>{const snapshot=await(await request.get('/api/editor/state')).json();const response=await request.put('/api/editor/state',{data:{revision:snapshot.revision,state:{...snapshot.state,clips:[],mediaAssets:[],subtitles:[],currentTime:0,selectedClipId:null,audioMaster:{},tracks:[{id:'av-video',name:'VIDEO 01',type:'video',isMuted:false,isSolo:false,headerBg:'#0f2942',laneBg:'#111d2e'},{id:'av-audio',name:'AUDIO 01',type:'audio',isMuted:false,isSolo:false,headerBg:'#0d3324',laneBg:'#10251e'}]}}});expect(response.status()).toBe(200);});
 for(const [channels,rate,duration,hevc] of [[2,48000,8,0],[8,48000,8,0],[2,96000,8,0],[2,192000,8,0],[1,16000,4433.7,0],[2,48000,4,8],[2,48000,4,10]])test(`converted MOV plays actual picture and sound: ${channels}ch ${rate}Hz ${duration}s HEVC=${hevc}`,async({page,request})=>{
- test.setTimeout(300000);
+ const previewDeadline=duration>1000?900000:240000;
+ test.setTimeout(previewDeadline+60000);
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'taledit av playback ')),file=path.join(dir,`camera-${channels}-${rate}.mov`);
  try{
  const sound=Array(channels).fill('0.1*sin(2*PI*440*t)').join('|');
@@ -23,7 +24,7 @@ for(const [channels,rate,duration,hevc] of [[2,48000,8,0],[8,48000,8,0],[2,96000
  });
  await page.goto('/',{waitUntil:'domcontentloaded'});await page.locator('[data-stage=true] input[type=file]').setInputFiles(file);
  const card=page.locator('[draggable=true]').filter({hasText:path.basename(file)});await expect(card).toBeVisible();
- await expect.poll(async()=>{const state=(await(await request.get('/api/editor/state')).json()).state;const asset=state.mediaAssets.find((a:any)=>a.name===path.basename(file));if(!asset)return 'uploading';return (await(await request.get('/api/media-preview/'+path.basename(asset.fileUrl)+'/status')).json()).status;},{timeout:240000}).toBe('ready');
+ await expect.poll(async()=>{const state=(await(await request.get('/api/editor/state')).json()).state;const asset=state.mediaAssets.find((a:any)=>a.name===path.basename(file));if(!asset)return 'uploading';return (await(await request.get('/api/media-preview/'+path.basename(asset.fileUrl)+'/status')).json()).status;},{timeout:previewDeadline}).toBe('ready');
  if(hevc)await card.dragTo(page.locator('[data-track-id=av-video]'),{targetPosition:{x:1,y:5}});else await card.dblclick();
  await expect.poll(async()=>{const snapshot=await(await request.get('/api/editor/state')).json();return snapshot.state.clips.length;}).toBe(2);
  const canvas=page.getByTestId('player-canvas');

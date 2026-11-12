@@ -73,6 +73,8 @@ export async function preparePreview(file:string,repair=false):Promise<string> {
     if(!video&&!audio)return file;
     if(video&&['.png','.jpg','.jpeg','.webp'].includes(ext))return file;
     const rate=video?.avg_frame_rate?.split('/').map(Number);const fps=rate?.[1]?rate[0]/rate[1]:0;
+    // Do not manufacture 30 copies of each frame in low-frame-rate recordings.
+    const previewFps=fps>0?Math.min(30,fps):30;
     const compatibleVideo=video?.codec_name==='h264'&&video?.pix_fmt==='yuv420p'&&video.width<=1920&&video.height<=1920&&fps<=30;
     const compatibleAudio=!audio||['aac','mp3'].includes(audio.codec_name);
     if(!repair&&video&&['.mp4','.m4v'].includes(ext)&&compatibleVideo&&compatibleAudio)return file;
@@ -80,7 +82,7 @@ export async function preparePreview(file:string,repair=false):Promise<string> {
     let input=file;if(repair){try{await validatePreview(previewPath(file),!!video,!!audio);const cached=await previewSignal(previewPath(file),!!video,!!audio,job.totalSeconds);if((!video||cached.video)&&(!audio||cached.audio))input=previewPath(file);else{const original=await previewSignal(file,!!video,!!audio,job.totalSeconds);if(!(video&&!cached.video&&original.video)&&!(audio&&!cached.audio&&original.audio))input=previewPath(file);}}catch{}}
     const temp=path.join(downloadsDir,`preview_${randomUUID()}.${repair?'webm':'mp4'}`);
     try {
-      await convert(file,['-hide_banner','-loglevel','error','-nostats','-progress','pipe:1','-y','-threads','4','-i',input,...(video?['-map',input===file?`0:${video.index}`:'0:v:0','-vf',"fps=30,scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",'-c:v',repair?'libvpx':'libx264',...(repair?['-deadline','realtime','-cpu-used','8','-b:v','2500k']:['-preset','ultrafast','-crf','23']),'-pix_fmt','yuv420p','-threads','4']:['-vn']),'-map','0:a:0?','-c:a',repair?'libopus':'aac','-ac','2','-ar','48000','-b:a','160k',...(repair?[]:['-movflags','+faststart']),temp],job);
+      await convert(file,['-hide_banner','-loglevel','error','-nostats','-progress','pipe:1','-y','-threads','4','-i',input,...(video?['-map',input===file?`0:${video.index}`:'0:v:0','-vf',`fps=${previewFps},scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`,'-c:v',repair?'libvpx':'libx264',...(repair?['-deadline','realtime','-cpu-used','8','-b:v','2500k']:['-preset','ultrafast','-crf','23']),'-pix_fmt','yuv420p','-threads','4']:['-vn']),'-map','0:a:0?','-c:a',repair?'libopus':'aac','-ac','2','-ar','48000','-b:a','160k',...(repair?[]:['-movflags','+faststart']),temp],job);
       checkCancelled(job);
       await validatePreview(temp,!!video,!!audio);
       checkCancelled(job);
