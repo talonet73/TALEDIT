@@ -19,7 +19,7 @@ export const ADJUSTMENTS = [
   { key:'sharpness', label:'Nitidezza' },
 ] as const;
 export type Adjustments = Partial<Record<typeof ADJUSTMENTS[number]['key'], number>>;
-export interface VisualSettings { mask?:import('./penMask').PenMask; colorGrade?:import('./colorGrade').ColorGrade; effects?: VisualEffect[]; adjustments?: Adjustments; fadeIn?: number; fadeOut?: number; duration: number; transparency?: number; intensity?: number; speed?: number; offset?: number; effectSpan?: number; speedLevel?:number }
+export interface VisualSettings { fadeEnvelopes?:TimelineClip['fadeEnvelopes']; mask?:import('./penMask').PenMask; colorGrade?:import('./colorGrade').ColorGrade; effects?: VisualEffect[]; adjustments?: Adjustments; fadeIn?: number; fadeOut?: number; duration: number; transparency?: number; intensity?: number; speed?: number; offset?: number; effectSpan?: number; speedLevel?:number }
 export const effectAmount = (settings: VisualSettings) => (settings.intensity ?? 5)/5;
 export function colorSettings(settings: VisualSettings) {
   const a = { brightness:0, contrast:0, saturation:0, exposure:0, temperature:0, tint:0, sharpness:0, ...settings.adjustments };
@@ -47,7 +47,7 @@ export function makeEffectClip(type:VisualEffect, trackId:string, time:number):T
   return {id:globalThis.crypto.randomUUID(),name:effect.label,type:'effect',effectType:type,trackId,startTime:Math.max(0,time),duration:3,effectSpan:3,offset:0,intensity:5,speed:5,transparency:100,volumeDb:0,fadeIn:0,fadeOut:0,color:'#cb5c5b'};
 }
 export function clipAlpha(settings: VisualSettings, elapsed: number) {
-  return Math.max(0,Math.min(1,(settings.transparency ?? 100)/100)) * Math.max(0,Math.min(1,settings.fadeIn ? elapsed/settings.fadeIn : 1, settings.fadeOut ? (settings.duration-elapsed)/settings.fadeOut : 1));
+  return (settings.fadeEnvelopes||[]).reduce((gain,e)=>gain*Math.max(0,Math.min(1,e.fadeIn?(e.offset+elapsed*e.rate)/e.fadeIn:1,e.fadeOut?(e.duration-e.offset-elapsed*e.rate)/e.fadeOut:1)),1) * Math.max(0,Math.min(1,(settings.transparency ?? 100)/100)) * Math.max(0,Math.min(1,settings.fadeIn ? elapsed/settings.fadeIn : 1, settings.fadeOut ? (settings.duration-elapsed)/settings.fadeOut : 1));
 }
 export function effectMix(settings:VisualSettings, elapsed:number, type?:string) {
   const fade=clipAlpha({...settings,transparency:100},elapsed);

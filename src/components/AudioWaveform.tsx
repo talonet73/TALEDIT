@@ -1,6 +1,8 @@
+import {expandCompoundClips} from '../services/compoundClips';
+import type {TimelineClip} from '../types/editor';
 import {useEffect,useState} from 'react';
 const cache=new Map<string,number[]>();
-export function AudioWaveform({url,offset,duration,speedLevel=0}:{url?:string;offset:number;duration:number;speedLevel?:number}){
+export function AudioWaveform({clip,url,offset,duration,speedLevel=0}:{clip?:TimelineClip;url?:string;offset:number;duration:number;speedLevel?:number}){
   const [peaks,setPeaks]=useState<number[]|null>(null),[error,setError]=useState(false);
   useEffect(()=>{
     setPeaks(null);setError(false);if(!url)return;
@@ -11,6 +13,7 @@ export function AudioWaveform({url,offset,duration,speedLevel=0}:{url?:string;of
     },180);
     return()=>{clearTimeout(timer);controller.abort();};
   },[url,offset,duration,speedLevel]);
+  if(clip?.segments)return <>{expandCompoundClips([clip]).map(part=><div key={part.id} className="absolute inset-y-0 pointer-events-none" style={{left:`${(part.startTime-clip.startTime)/clip.duration*100}%`,width:`${part.duration/clip.duration*100}%`}}><AudioWaveform url={part.mediaUrl} offset={part.offset} duration={part.duration} speedLevel={part.speedLevel}/></div>)}</>;
   if(error)return <span className="absolute bottom-1 right-2 text-[8px]">Onda non disponibile</span>;
   if(!peaks)return null;
   const max=Math.max(.02,...peaks),gain=Math.min(8,.85/max);

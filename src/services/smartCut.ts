@@ -33,3 +33,6 @@ export function rippleRemove(clips:TimelineClip[],ranges:{start:number;end:numbe
   const next=parts.map(({clip,original,index})=>{const linked=original.isLinked&&original.linkedClipId?ids.get(`${original.linkedClipId}:${index}`):undefined;return {...clip,linkedClipId:linked,isLinked:!!linked};});
   return {clips:joinCutSeams(next),duration:target,mapTime:(t:number)=>Math.max(0,t-cuts.reduce((sum,r)=>sum+Math.max(0,Math.min(t,r.end)-r.start),0))};
 }
+
+/** Digital silence only: keep 5 ms at each edge, without classifying quiet speech. */
+export function flatSilenceCuts(silences:{start:number;end:number}[],duration:number){return mergeRanges(silences,duration).filter(r=>r.end-r.start>=.03).map(r=>({id:crypto.randomUUID(),start:r.start+.005,end:r.end-.005,reason:'pause' as const,label:'Tratto a volume zero',selected:true}));}

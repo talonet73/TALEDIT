@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import {receiveMedia,preparePreview,previewStatus,cancelPreview,retryPreview} from './server/importMedia';
+import {receiveMedia,preparePreview,previewStatus,cancelPreview,retryPreview,repairPreview,previewDiagnostics} from './server/importMedia';
 import {saveScreenshotToDownloads} from './server/screenshot';
 import express from 'express';
 import path from 'node:path';
@@ -32,6 +32,8 @@ export async function createApp(production = process.env.NODE_ENV === 'productio
   app.get('/api/media-preview/:filename/status',(req,res,next)=>{try{res.json(previewStatus(previewFile(req.params.filename)));}catch(error){next(error);}});
   app.post('/api/media-preview/:filename/cancel',(req,res,next)=>{try{res.json(cancelPreview(previewFile(req.params.filename)));}catch(error){next(error);}});
   app.post('/api/media-preview/:filename/retry',async(req,res,next)=>{try{await retryPreview(previewFile(req.params.filename));res.json({success:true});}catch(error){next(error);}});
+  app.post('/api/media-preview/:filename/repair',async(req,res,next)=>{try{await repairPreview(previewFile(req.params.filename));res.json({success:true});}catch(error){next(error);}});
+  app.get('/api/media-preview/:filename/diagnostics',async(req,res,next)=>{try{res.json(await previewDiagnostics(previewFile(req.params.filename)));}catch(error){next(error);}});
   app.get('/api/media-preview/:filename', async (req,res,next)=>{
     try {
       const name=req.params.filename;
@@ -42,7 +44,7 @@ export async function createApp(production = process.env.NODE_ENV === 'productio
   });
   app.use(express.json({ limit: '5mb' }));
   app.get('/api/health', async (_req, res) => {
-    try { await Promise.all([run('ffmpeg', ['-version']), run('ffprobe', ['-version'])]); res.json({ status: 'ok', ffmpeg: true, ffprobe: true }); }
+    try { await Promise.all([run('ffmpeg', ['-version']), run('ffprobe', ['-version'])]); res.json({ status: 'ok', ffmpeg: true, ffprobe: true,version:await fs.readFile(path.resolve('..','VERSION.txt'),'utf8').then(s=>s.trim(),()=> 'sviluppo') }); }
     catch { res.status(503).json({ status: 'error', error: 'Installa FFmpeg e ffprobe.' }); }
   });
   installMcp(app);

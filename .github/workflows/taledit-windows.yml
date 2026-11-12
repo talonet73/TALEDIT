@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$pwd\build\windows\payload\tools;" + $env:PATH
-          npx tsx --test tests/large-import.test.ts
+          npx tsx --test tests/large-import.test.ts tests/compound-clips.test.ts tests/editing-requests.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify Windows launch and duplicate launch before compression
         run: python packaging/windows/launcher-smoke.py build/windows/payload

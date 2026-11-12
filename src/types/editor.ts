@@ -11,6 +11,10 @@ export interface TimelineMarker {
 }
 
 export interface TimelineClip {
+  fadeEnvelopes?:{offset:number;rate:number;duration:number;fadeIn:number;fadeOut:number}[];
+  segments?:TimelineClip[];
+  rateMultiplier?:number;
+  suppressEmbeddedAudio?:boolean;
   id: string;
   name: string;
   trackId: string;

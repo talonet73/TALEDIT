@@ -1,3 +1,4 @@
+import {joinSelectedClips,expandCompoundClips} from './services/compoundClips';
 import {validateCaptionClip} from './services/karaoke';
 import {FullscreenTools} from './components/FullscreenTools';
 import {SmartCutPanel} from './components/SmartCutPanel';
@@ -357,7 +358,7 @@ export default function App() {
   const handleSaveTalProject = () => {
     const projectData = {
       appName: 'TALEDIT',
-      version: '2.1.0',captionWorkflow:'timeline',
+      version: '3.0.0',captionWorkflow:'timeline',
       savedAt: new Date().toISOString(),
       tracks,audioMaster,
       clips,
@@ -390,6 +391,7 @@ export default function App() {
         const content = evt.target?.result as string;
         const data = JSON.parse(content);
         if (data.appName !== 'TALEDIT' || !Array.isArray(data.tracks) || !Array.isArray(data.clips) || data.clips.some((c: any) => !c.id || !['video','audio','image','effect','text'].includes(c.type) || !Number.isFinite(c.startTime) || c.startTime < 0 || !Number.isFinite(c.duration) || c.duration <= 0 || !validSpeedLevel(c.speedLevel))) throw new Error('Progetto TALEDIT non valido.');
+        expandCompoundClips(data.clips);
         validateAudio(data.audioMaster);for(const t of data.tracks)validateAudio(t.audio);for(const c of data.clips){validateGrade(c.colorGrade);validateMask(c.mask);validateCaptionClip(c);}
         setAudioMaster(data.audioMaster||{});
         let normalized=normalizeTrackAssignments(data.clips,data.tracks);
@@ -652,6 +654,8 @@ export default function App() {
       setSelectedClipIds([clipId]);
     }
   };
+
+  const handleJoinSelected=()=>{try{const result=joinSelectedClips(clips,tracks,selectedClipIds.filter(id=>workspace!=='audio'||clips.find(c=>c.id===id)?.type==='audio'));setIsPlaying(false);setClips(result.clips);clipsRef.current=result.clips;pushHistory(result.clips);setSelectedClipIds(result.joinedIds);setSelectedClipId(result.joinedIds[0]);}catch(error){setTrackConstraintWarning((error as Error).message);}};
 
   const handleSelectMultipleClips = (clipIds: string[]) => {
     setSelectedClipIds(clipIds);
@@ -1094,6 +1098,7 @@ export default function App() {
           totalDuration={totalDuration}
           selectedClipId={selectedClipId}
           selectedClipIds={selectedClipIds}
+          onJoinSelected={handleJoinSelected}
           zoom={zoom}
           setZoom={setZoom}
           onSeek={t => setCurrentTime(t)}

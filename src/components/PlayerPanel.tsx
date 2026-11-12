@@ -1,3 +1,4 @@
+import {expandCompoundClips} from '../services/compoundClips';
 import {PenMaskControls,PenMaskOverlay} from './PenMaskEditor';
 import type {PenMask} from '../services/penMask';
 import React, { useRef, useEffect, useState } from 'react';
@@ -64,31 +65,32 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
     return `00:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${frames.toString().padStart(2, '0')}`;
   };
 
+  const expandedClips=expandCompoundClips(clips);
   // Convert timeline clips to engine formats
-  const videoClips = clips
+  const videoClips = expandedClips
     .filter(c => c.type === 'video')
     .map(c => ({
       id: c.id,trackId:c.trackId,
-      name: c.name,speedLevel:c.speedLevel,
+      name: c.name,speedLevel:c.speedLevel,rateMultiplier:c.rateMultiplier,fadeEnvelopes:c.fadeEnvelopes,
       transparency: c.transparency,
       effects: c.effects, adjustments: c.adjustments,colorGrade:c.colorGrade,mask:c.mask,
       volumeDb: c.volumeDb,
       fadeIn:c.fadeIn,fadeOut:c.fadeOut,
-      layer: clips.indexOf(c),
+      layer: expandedClips.indexOf(c),
       startTime: c.startTime,
       duration: c.duration,
       offset: c.offset,
       mediaUrl: c.mediaUrl,
-      hasSeparateAudioClip: Boolean(c.linkedClipId) || clips.some(
+      hasSeparateAudioClip: Boolean(c.suppressEmbeddedAudio||c.linkedClipId) || expandedClips.some(
         other => other.type === 'audio' && other.linkedClipId === c.id
       )
     }));
 
-  const audioClips = clips
+  const audioClips = expandedClips
     .filter(c => c.type === 'audio')
     .map(c => ({
       id: c.id,trackId:c.trackId,
-      name: c.name,speedLevel:c.speedLevel,
+      name: c.name,speedLevel:c.speedLevel,rateMultiplier:c.rateMultiplier,fadeEnvelopes:c.fadeEnvelopes,
       volumeDb: c.volumeDb,
       fadeIn:c.fadeIn,fadeOut:c.fadeOut,
       startTime: c.startTime,
@@ -97,11 +99,11 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
       mediaUrl: c.mediaUrl,
     }));
 
-  const effectClips = clips
+  const effectClips = expandedClips
     .filter(c => c.type === 'effect')
     .map(c => ({
       id: c.id,trackId:c.trackId,
-      name: c.name,speedLevel:c.speedLevel,
+      name: c.name,speedLevel:c.speedLevel,rateMultiplier:c.rateMultiplier,fadeEnvelopes:c.fadeEnvelopes,
       fadeIn: c.fadeIn,
       fadeOut: c.fadeOut,
       startTime: c.startTime,
@@ -110,16 +112,16 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
       effectType: c.effectType
     }));
 
-  const imageClips = clips
+  const imageClips = expandedClips
     .filter(c => c.type === 'image')
     .map(c => ({
       id: c.id,trackId:c.trackId,
-      name: c.name,speedLevel:c.speedLevel,
+      name: c.name,speedLevel:c.speedLevel,rateMultiplier:c.rateMultiplier,fadeEnvelopes:c.fadeEnvelopes,
       transparency: c.transparency,
       effects: c.effects, adjustments: c.adjustments,colorGrade:c.colorGrade,mask:c.mask,
       volumeDb: c.volumeDb,
       fadeIn:c.fadeIn,fadeOut:c.fadeOut,
-      layer: clips.indexOf(c),
+      layer: expandedClips.indexOf(c),
       startTime: c.startTime,
       duration: c.duration,
       mediaUrl: c.mediaUrl,
@@ -128,7 +130,7 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
   // Re-render when frames are ready from video elements
   useEffect(() => {
     playbackEngine.setOnFrameReady(() => {
-      setMediaError(playbackEngine.mediaError(clips.filter(c=>currentTime>=c.startTime&&currentTime<c.startTime+c.duration)));
+      setMediaError(playbackEngine.mediaError(expandedClips.filter(c=>currentTime>=c.startTime&&currentTime<c.startTime+c.duration)));
       if (canvasRef.current) {
         playbackEngine.renderFrame(canvasRef.current, currentTime, videoClips, effectClips, imageClips, subtitles);
       }
@@ -140,7 +142,7 @@ export const PlayerPanel: React.FC<PlayerPanelProps> = ({
   useEffect(() => {
     let cancelled=false;
     playbackEngine.syncMedia(currentTime, isPlaying, videoClips, audioClips, isMuted, tracks,audioMaster);
-    setMediaError(playbackEngine.mediaError(clips.filter(c=>currentTime>=c.startTime&&currentTime<c.startTime+c.duration)));
+    setMediaError(playbackEngine.mediaError(expandedClips.filter(c=>currentTime>=c.startTime&&currentTime<c.startTime+c.duration)));
     const canvas=canvasRef.current;
     if(canvas){
       if(isPlaying)playbackEngine.renderFrame(canvas,currentTime,videoClips,effectClips,imageClips,subtitles);

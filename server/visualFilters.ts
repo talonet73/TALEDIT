@@ -25,6 +25,7 @@ export function visualFilters(clip: TimelineClip, width: number, height: number,
   }
   if(!global && clip.fadeIn)parts.push(`fade=t=in:d=${clip.fadeIn}:alpha=1`);
   if(!global && clip.fadeOut)parts.push(`fade=t=out:st=${Math.max(0,clip.duration-clip.fadeOut)}:d=${clip.fadeOut}:alpha=1`);
+  if(!global&&clip.fadeEnvelopes?.length){const weight=clip.fadeEnvelopes.map(e=>`max(0,min(1,min(${e.fadeIn?`(${e.offset}+T*${e.rate})/${e.fadeIn}`:'1'},${e.fadeOut?`(${e.duration}-${e.offset}-T*${e.rate})/${e.fadeOut}`:'1'})))`).join('*');parts.push('format=gbrap',`geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${weight}'`);}
   if(!global)parts.push(`colorchannelmixer=aa=${(clip.transparency??100)/100}`,`setpts=PTS+${clip.startTime}/TB`);
   return parts.join(',');
 }

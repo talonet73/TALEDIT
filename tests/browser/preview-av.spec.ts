@@ -21,7 +21,7 @@ for(const [channels,rate,duration,hevc] of [[2,48000,8,0],[8,48000,8,0],[2,96000
    return result;
   } as any;
  });
- await page.goto('/');await page.locator('[data-stage=true] input[type=file]').setInputFiles(file);
+ await page.goto('/',{waitUntil:'domcontentloaded'});await page.locator('[data-stage=true] input[type=file]').setInputFiles(file);
  const card=page.locator('[draggable=true]').filter({hasText:path.basename(file)});await expect(card).toBeVisible();
  await expect.poll(async()=>{const state=(await(await request.get('/api/editor/state')).json()).state;const asset=state.mediaAssets.find((a:any)=>a.name===path.basename(file));if(!asset)return 'uploading';return (await(await request.get('/api/media-preview/'+path.basename(asset.fileUrl)+'/status')).json()).status;},{timeout:240000}).toBe('ready');
  if(hevc)await card.dragTo(page.locator('[data-track-id=av-video]'),{targetPosition:{x:1,y:5}});else await card.dblclick();
@@ -48,7 +48,7 @@ test('a browser decoder failure is visible in the Player instead of an unexplain
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'taledit decoder error ')),file=path.join(dir,'Errore anteprima.mov');
  try{
   execFileSync('ffmpeg',['-v','error','-y','-f','lavfi','-i','color=red:s=160x90:r=25:d=1','-c:v','libx264','-threads','2','-pix_fmt','yuv420p',file]);
-  await page.goto('/');await page.locator('[data-stage=true] input[type=file]').setInputFiles(file);
+  await page.goto('/',{waitUntil:'domcontentloaded'});await page.locator('[data-stage=true] input[type=file]').setInputFiles(file);
   const card=page.locator('[draggable=true]').filter({hasText:path.basename(file)});await expect(card).toBeVisible();
   await page.route('**/api/media-preview/*',route=>route.fulfill({status:200,contentType:'video/mp4',body:'invalid media bytes'}));
   await card.dblclick();

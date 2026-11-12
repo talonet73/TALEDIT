@@ -29,7 +29,7 @@ export interface VideoClipData extends Partial<VisualSettings> {
 }
 
 export interface AudioClipData {
-  speedLevel?:number;
+  speedLevel?:number;rateMultiplier?:number;fadeEnvelopes?:import('../types/editor').TimelineClip['fadeEnvelopes'];
   trackId?:string;
   id: string;
   name: string;
@@ -84,13 +84,17 @@ export class PlaybackEngine {
   private onFrameReady: (() => void) | null = null;
   private notify = () => this.onFrameReady?.();
   public setOnFrameReady(callback: (() => void) | null) { this.onFrameReady = callback; }
-  public refreshMedia(url:string) {
-    const preview='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
-    for(const element of [...this.videoCache.values(),...this.audioCache.values()])if(element.getAttribute('src')===preview&&element.error)element.load();
+  private mediaRevision=new Map<string,number>();
+  private previewUrl(url:string){if(!url.startsWith('/media_downloads/'))return url;return '/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length))+(this.mediaRevision.has(url)?`?v=${this.mediaRevision.get(url)}`:'');}
+  public diagnostics(url:string){const base='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));const collect=(cache:Map<string,HTMLMediaElement>)=>[...cache.entries()].filter(([,e])=>e.getAttribute('src')?.split('?')[0]===base).map(([id,e])=>({id,source:e.currentSrc,currentTime:e.currentTime,duration:e.duration,readyState:e.readyState,seeking:e.seeking,paused:e.paused,muted:e.muted,volume:e.volume,playbackRate:e.playbackRate,width:e instanceof HTMLVideoElement?e.videoWidth:undefined,height:e instanceof HTMLVideoElement?e.videoHeight:undefined,error:e.error?{code:e.error.code,message:e.error.message}:null}));return {video:collect(this.videoCache),audio:collect(this.audioCache),audioContext:this.audioContext?.state||'not_started',master:this.audioLevel('master')};}
+  public refreshMedia(url:string,force=false) {
+    const base='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
+    const affected=[...this.videoCache.values(),...this.audioCache.values()].filter(e=>e.getAttribute('src')?.split('?')[0]===base);
+    if(force||affected.some(e=>e.error)){this.mediaRevision.set(url,(this.mediaRevision.get(url)||0)+1);for(const element of affected){element.src=this.previewUrl(url);element.load();}}
     this.notify();
   }
   public getVideoElement(url: string, key = url) {
-    if(url.startsWith('/media_downloads/'))url='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
+    url=this.previewUrl(url);
     let element = this.videoCache.get(key);
     if (element && element.getAttribute('src') !== url) { element.pause(); element.src = url; }
     if (!element) {
@@ -102,7 +106,7 @@ export class PlaybackEngine {
     return element;
   }
   public getAudioElement(url: string, key = url) {
-    if(url.startsWith('/media_downloads/'))url='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
+    url=this.previewUrl(url);
     let element = this.audioCache.get(key);
     if (element && element.getAttribute('src') !== url) { element.pause(); element.src = url; }
     if (!element) { element = new Audio(); element.crossOrigin = 'anonymous'; element.preload = 'auto'; element.src = url;for(const event of ['loadeddata','canplay','error'])element.addEventListener(event,this.notify);this.audioCache.set(key, element); }

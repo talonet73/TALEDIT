@@ -28,6 +28,8 @@ interface TimelineProps {
   totalDuration: number;
   selectedClipId: string | null;
   selectedClipIds?: string[];
+  onJoinSelected?:()=>void;
+  joining?:boolean;
   zoom: number; // pixels per second
   setZoom: (zoom: number) => void;
   onSeek: (time: number) => void;
@@ -58,7 +60,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   currentTime,
   totalDuration,
   selectedClipId,
-  selectedClipIds = [],
+  selectedClipIds = [],onJoinSelected,joining=false,
   zoom,
   setZoom,
   onSeek,
@@ -195,12 +197,13 @@ export const Timeline: React.FC<TimelineProps> = ({
   useEffect(()=>{
     const container=containerRef.current;if(!container)return;let frame=0;
     const wheel=(event:WheelEvent)=>{
+      if(!container.contains(event.target as Node)&&!(event.target as Element).closest('[data-timeline-menu]'))return;
       if((event.target as Element).closest('[role="dialog"],[data-draggable-window]'))return;
       const lanes=lanesRef.current;if(!lanes)return;
       const delta=(event.deltaY || event.deltaX)*(event.deltaMode===1?16:event.deltaMode===2?lanes.clientHeight:1);
       if(!delta)return;
-      if(!event.ctrlKey){if(headersRef.current?.contains(event.target as Node)){event.preventDefault();lanes.scrollTop+=delta;handleLanesScroll();}return;}
-      event.preventDefault();event.stopPropagation();
+      if(!event.ctrlKey&&!event.metaKey){if(headersRef.current?.contains(event.target as Node)){event.preventDefault();lanes.scrollTop+=delta;handleLanesScroll();}return;}
+      event.preventDefault();event.stopPropagation();setContextMenu(null);
       const view=viewRef.current,factor=Math.exp(-Math.max(-500,Math.min(500,delta))/500);
       const nextZoom=Math.max(5,Math.min(480,Math.round(view.zoom*factor))),nextVertical=Math.max(.25,Math.min(4,view.verticalZoom*factor));
       const rect=lanes.getBoundingClientRect(),x=Math.max(0,Math.min(lanes.clientWidth,event.clientX-rect.left)),y=Math.max(0,event.clientY-rect.top);
@@ -214,7 +217,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       viewRef.current={...view,zoom:nextZoom,verticalZoom:nextVertical};setZoom(nextZoom);setVerticalZoom(nextVertical);
       cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{lanes.scrollLeft=Math.max(0,left);lanes.scrollTop=Math.max(0,scrollTop);handleLanesScroll();});
     };
-    container.addEventListener('wheel',wheel,{passive:false});return()=>{container.removeEventListener('wheel',wheel);cancelAnimationFrame(frame);};
+    document.addEventListener('wheel',wheel,{passive:false,capture:true});return()=>{document.removeEventListener('wheel',wheel,{capture:true});cancelAnimationFrame(frame);};
   },[setZoom]);
 
   // Global mouse move & up listeners
@@ -346,27 +349,6 @@ export const Timeline: React.FC<TimelineProps> = ({
     };
   }, [isScrubbing, draggingClip, trimmingClip, draggingHandle, selectionBox, zoom, durationSec, density, onSeek, onUpdateClip, clips, tracks, onSelectMultipleClips]);
 
-  // Handle CTRL + Mouse Wheel to zoom in / zoom out
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        if (e.deltaY < 0) {
-          setZoom(Math.min(60, zoom + 3));
-        } else if (e.deltaY > 0) {
-          setZoom(Math.max(8, zoom - 3));
-        }
-      }
-    };
-
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => {
-      el.removeEventListener('wheel', handleWheel);
-    };
-  }, [zoom, setZoom]);
 
   const handleRulerMouseDown = (e: React.MouseEvent) => {
     if (!lanesRef.current) return;
@@ -408,7 +390,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   return (
     <div
-      ref={containerRef}
+      ref={containerRef} onContextMenu={e=>e.preventDefault()}
       data-testid="timeline"
       className="flex flex-col bg-[#0b0e17] text-white select-none h-full relative"
     >
@@ -652,7 +634,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         if (lanesContainerRef.current) {
                           const rect = lanesContainerRef.current.getBoundingClientRect();
                           const scrollLeft = lanesRef.current ? lanesRef.current.scrollLeft : 0;
-                          const startX = e.clientX - rect.left + scrollLeft;
+                          const startX = e.clientX - rect.left;
                           const startY = e.clientY - rect.top;
                           setSelectionBox({ startX, startY, currentX: startX, currentY: startY });
                         }
@@ -661,10 +643,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                     onContextMenu={e => {
                       if (e.target === e.currentTarget) {
                         // Se l'utente clicca col tasto destro sulla corsia della traccia
-                        const unlinkedClip = trackClips.find(c => !c.isLinked && (c.type === 'video' || c.type === 'audio'));
+                        const unlinkedClip = clips.find(c=>selectedClipIds.includes(c.id));
                         if (unlinkedClip) {
                           e.preventDefault();
-                          onSelectClip(unlinkedClip.id);
+                          if(!selectedClipIds.includes(unlinkedClip.id))onSelectClip(unlinkedClip.id);
                           setContextMenu({
                             x: e.clientX,
                             y: e.clientY,
@@ -684,9 +666,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                       const clipWidth = Math.max(35, clip.duration * zoom);
 
                       if(clip.type==='text')return <div key={clip.id} data-clip-id={clip.id} style={{left:clipLeft,width:clipWidth}} className={`absolute top-1 bottom-1 rounded bg-orange-500 text-black p-1.5 cursor-grab overflow-hidden ${isSelected?'ring-2 ring-cyan-300 z-30':''}`}
-                        onClick={e=>{e.stopPropagation();onSelectClip(clip.id,e.shiftKey||e.ctrlKey||e.metaKey);}}
-                        onMouseDown={e=>{if(e.button!==0)return;e.stopPropagation();onSelectClip(clip.id);setDraggingClip({id:clip.id,startX:e.clientX,originalStartTime:clip.startTime});}}
-                        onContextMenu={e=>{e.preventDefault();e.stopPropagation();onSelectClip(clip.id);setContextMenu({x:e.clientX,y:e.clientY,clip});}}>
+                        onClick={e=>{e.stopPropagation();if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey)onSelectClip(clip.id);}}
+                        onMouseDown={e=>{if(e.button!==0)return;e.stopPropagation();if(e.shiftKey||e.ctrlKey||e.metaKey)onSelectClip(clip.id,true);else if(!isSelected)onSelectClip(clip.id);setDraggingClip({id:clip.id,startX:e.clientX,originalStartTime:clip.startTime});}}
+                        onContextMenu={e=>{e.preventDefault();e.stopPropagation();if(!selectedClipIds.includes(clip.id))onSelectClip(clip.id);setContextMenu({x:e.clientX,y:e.clientY,clip});}}>
                         <span className="text-xs font-bold whitespace-pre">{clip.text || clip.name}</span>
                         {(['start','end'] as const).map(edge=><div key={edge} data-handle={`trim-${edge}`} title={edge==='start'?"Trascina per accorciare o allungare dall'inizio":"Trascina per accorciare o allungare dalla fine"} className={`absolute top-0 bottom-0 w-2 cursor-ew-resize bg-black/20 hover:bg-white ${edge==='start'?'left-0':'right-0'}`} onMouseDown={e=>{e.stopPropagation();setTrimmingClip({id:clip.id,edge,startX:e.clientX,originalStartTime:clip.startTime,originalDuration:clip.duration,originalOffset:clip.offset || 0});}}/>)}
                       </div>;
@@ -705,7 +687,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             }}
                             onClick={e => {
                               e.stopPropagation();
-                              onSelectClip(clip.id, e.shiftKey || e.ctrlKey || e.metaKey);
+                              if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey)onSelectClip(clip.id);
                             }}
                             onMouseDown={e => {
                               if (e.button !== 0) return;
@@ -725,7 +707,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             onContextMenu={e => {
                               e.preventDefault();
                               e.stopPropagation();
-                              onSelectClip(clip.id);
+                              if(!selectedClipIds.includes(clip.id))onSelectClip(clip.id);
                               setContextMenu({
                                 x: e.clientX,
                                 y: e.clientY,
@@ -870,7 +852,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             }}
                             onClick={e => {
                               e.stopPropagation();
-                              onSelectClip(clip.id, e.shiftKey || e.ctrlKey || e.metaKey);
+                              if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey)onSelectClip(clip.id);
                             }}
                             onMouseDown={e => {
                               if (e.button !== 0) return;
@@ -893,7 +875,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             onContextMenu={e => {
                               e.preventDefault();
                               e.stopPropagation();
-                              onSelectClip(clip.id);
+                              if(!selectedClipIds.includes(clip.id))onSelectClip(clip.id);
                               setContextMenu({
                                 x: e.clientX,
                                 y: e.clientY,
@@ -1006,7 +988,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             }}
                             onClick={e => {
                               e.stopPropagation();
-                              onSelectClip(clip.id, e.shiftKey || e.ctrlKey || e.metaKey);
+                              if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey)onSelectClip(clip.id);
                             }}
                             onMouseDown={e => {
                               if (e.button !== 0) return;
@@ -1029,7 +1011,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             onContextMenu={e => {
                               e.preventDefault();
                               e.stopPropagation();
-                              onSelectClip(clip.id);
+                              if(!selectedClipIds.includes(clip.id))onSelectClip(clip.id);
                               setContextMenu({
                                 x: e.clientX,
                                 y: e.clientY,
@@ -1042,7 +1024,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 : 'hover:brightness-110'
                             }`}
                           >
-                            <AudioWaveform url={clip.mediaUrl} offset={clip.offset || 0} duration={clip.duration} speedLevel={clip.speedLevel}/>
+                            <AudioWaveform clip={clip} url={clip.mediaUrl} offset={clip.offset || 0} duration={clip.duration} speedLevel={clip.speedLevel}/>
                             {isSelected && (
                               <span className="absolute -top-2.5 right-1 bg-cyan-400 text-black font-extrabold text-[8px] px-1 py-0.2 rounded shadow pointer-events-none tracking-wider z-40">
                                 SELEZIONATO
@@ -1144,7 +1126,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             }}
                             onClick={e => {
                               e.stopPropagation();
-                              onSelectClip(clip.id, e.shiftKey || e.ctrlKey || e.metaKey);
+                              if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey)onSelectClip(clip.id);
                             }}
                             onMouseDown={e => {
                               if (e.button !== 0) return;
@@ -1164,7 +1146,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             onContextMenu={e => {
                               e.preventDefault();
                               e.stopPropagation();
-                              onSelectClip(clip.id);
+                              if(!selectedClipIds.includes(clip.id))onSelectClip(clip.id);
                               setContextMenu({
                                 x: e.clientX,
                                 y: e.clientY,
@@ -1302,6 +1284,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          {onJoinSelected&&selectedClipIds.length>=2&&<button disabled={joining} onClick={onJoinSelected} className="text-cyan-300">{joining?'Unione in corso…':'Unisci selezionati'}</button>}
           <span className="text-[10px] text-gray-400" title="Ctrl + rotella ingrandisce o riduce larghezza e altezza">Ctrl + rotella · Altezza {Math.round(verticalZoom*100)}%</span><span className="text-[11px] font-medium text-gray-300">Zoom</span>
           <button
             onClick={() => setZoom(Math.max(5, zoom - 5))}
@@ -1542,7 +1525,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
       {/* Right-Click Context Menu for Mattoncini (Separazione / Unione / Eliminazione) */}
       {contextMenu && (
-        <div
+        <div data-timeline-menu="true"
           style={{
             position: 'fixed',
             left: `${Math.min(window.innerWidth - 240, Math.max(10, contextMenu.x))}px`,
@@ -1560,6 +1543,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             </span>
           </div>
 
+          {onJoinSelected&&selectedClipIds.length>=2&&<button disabled={joining} onClick={()=>{onJoinSelected();setContextMenu(null);}} className="w-full px-2.5 py-2 text-left text-cyan-300">Unisci mattoncini selezionati</button>}
           <button onClick={()=>{setSpeedClip(contextMenu.clip);setSpeedLevel(contextMenu.clip.speedLevel ?? 0);setContextMenu(null);}} className="w-full px-2.5 py-2 rounded text-left hover:bg-slate-700 flex justify-between"><span>Velocità clip…</span><span>{Math.round(clipRate(contextMenu.clip)*100)}%</span></button>
           {(contextMenu.clip.type === 'video' || contextMenu.clip.type === 'audio') && (
             <>
@@ -1587,7 +1571,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                   className="w-full text-left px-2.5 py-1.5 rounded hover:bg-[#1a253a] text-cyan-300 hover:text-cyan-200 flex items-center gap-2 transition-colors cursor-pointer"
                 >
                   <Link2 className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Unisci video e audio</span>
+                  <span>Collega video e audio</span>
                 </button>
               )}
             </>

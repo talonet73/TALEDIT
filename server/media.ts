@@ -1,3 +1,4 @@
+import {expandCompoundClips} from '../src/services/compoundClips';
 import {maskPng} from './maskPng';
 import {validateMask} from '../src/services/penMask';
 import {karaokeLayout,validateWords,validateCaptionClip} from '../src/services/karaoke';
@@ -60,6 +61,7 @@ function number(value: unknown, fallback: number, min: number, max: number) {
   return n;
 }
 export async function exportMedia(body: any, options:{screenshot?:boolean}={}) {
+  if(Array.isArray(body.clips)){try{body={...body,clips:expandCompoundClips(body.clips)};}catch(error){throw new InputError((error as Error).message);}}
   const { format = 'mp4', resolution = '1080p', aspectRatio = '16:9' } = body;
   if (!Object.values(EXPORT_FORMATS).flat().includes(format)) throw new InputError('Formato non supportato.');
   if (!['720p', '1080p', '4K'].includes(resolution) || !['16:9', '9:16', '1:1', '4:3'].includes(aspectRatio)) throw new InputError('Risoluzione o proporzioni non valide.');
@@ -130,7 +132,7 @@ export async function exportMedia(body: any, options:{screenshot?:boolean}={}) {
   const audioTrackIds=new Map<string,string>();
   for (const clip of resolved.sort((a,b)=>a.startTime-b.startTime)) {
     const visual = !audioOnly && (clip.type === 'video' || clip.type === 'image');
-    const separateAudio = clip.type === 'video' && (clip.linkedClipId || body.clips.some((c: TimelineClip) => c.type === 'audio' && c.linkedClipId === clip.id));
+    const separateAudio = clip.type === 'video' && (clip.suppressEmbeddedAudio || clip.linkedClipId || body.clips.some((c: TimelineClip) => c.type === 'audio' && c.linkedClipId === clip.id));
     const audible = !still && (clip.type === 'audio' || (clip.type === 'video' && !separateAudio)) && clip.info.streams.some((s: any) => s.codec_type === 'audio');
     if (!visual && !audible) continue;
     const idx = input++;
@@ -152,7 +154,8 @@ export async function exportMedia(body: any, options:{screenshot?:boolean}={}) {
     if (audible) {
       const a = `a${idx}`;
       const volume = clip.volumeDb <= -60 ? '0' : `${clip.volumeDb || 0}dB`;
-      const fade = `${clip.fadeIn ? `,afade=t=in:d=${clip.fadeIn}` : ''}${clip.fadeOut ? `,afade=t=out:st=${Math.max(0, clip.duration - clip.fadeOut)}:d=${clip.fadeOut}` : ''}`;
+      const envelopes=(clip.fadeEnvelopes||[]).map(e=>`max(0,min(1,min(${e.fadeIn?`(${e.offset}+t*${e.rate})/${e.fadeIn}`:'1'},${e.fadeOut?`(${e.duration}-${e.offset}-t*${e.rate})/${e.fadeOut}`:'1'})))`).join('*');
+      const fade = `${envelopes?`,volume='${envelopes}':eval=frame`:''}${clip.fadeIn ? `,afade=t=in:d=${clip.fadeIn}` : ''}${clip.fadeOut ? `,afade=t=out:st=${Math.max(0, clip.duration - clip.fadeOut)}:d=${clip.fadeOut}` : ''}`;
       filters.push(`[${idx}:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,${tempoFilters(clipRate(clip)).map(f=>f+',').join('')}volume=${volume}${fade},apad,atrim=duration=${Math.min(clip.duration,duration-clip.startTime)},adelay=${Math.round(clip.startTime * 1000)}:all=1[${a}]`);
       audioTags.push(`[${a}]`);audioTrackIds.set(`[${a}]`,clip.trackId);
     }
