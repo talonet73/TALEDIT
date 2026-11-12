@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [codex/taledit-export-mcp-whisper]
-    paths: ['packaging/windows/**', '.github/workflows/taledit-windows.yml']
+    paths: ['server.ts', 'server/**', 'src/**', 'public/**', 'scripts/**', 'package.json', 'package-lock.json', 'vite.config.ts', 'tests/large-import.test.ts', 'packaging/windows/**', '.github/workflows/taledit-windows.yml']
 permissions:
   contents: read
 concurrency:

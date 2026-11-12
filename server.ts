@@ -63,7 +63,7 @@ export async function createApp(production = process.env.NODE_ENV === 'productio
     const file = path.basename(req.params.filename);
     res.download(path.join(downloadsDir, file), file, error => { if (error && !res.headersSent) res.status(404).json({ error: 'File non trovato.' }); });
   });
-  app.use('/media_downloads', express.static(downloadsDir, { dotfiles: 'deny', index: false }));
+  app.use('/media_downloads', express.static(downloadsDir, { dotfiles: 'deny', index: false, setHeaders:res=>res.setHeader('X-Content-Type-Options','nosniff') }));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Endpoint non trovato.' }));
   if (production) {
     app.use(express.static(path.resolve('dist')));

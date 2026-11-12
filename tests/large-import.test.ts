@@ -37,7 +37,7 @@ test('4K 60 fps MOV imports above 500 MB with bounded streaming and a seekable p
 test('FFmpeg detects FLAC and MPEG-TS, including unknown extensions, instead of extension allowlisting',async()=>{
  for(const [format,name,args] of [['flac','Registrazione.flac',['-f','lavfi','-i','sine=d=0.1','-c:a','flac']],['mpegts','Camera.mts',['-f','lavfi','-i','color=blue:s=160x90:r=25:d=1','-c:v','mpeg2video','-threads','2']]] as const){
   const source=path.join(folder,'source-'+format);await exec('ffmpeg',['-v','error','-y',...args,'-f',format,source]);
-  if(format==='flac'){const unknown=await upload('Audio.dat',await fs.readFile(source));assert.equal(unknown.type,'audio');}
+  if(format==='flac'){for(const name of ['Audio.dat','Audio.html']){const unknown=await upload(name,await fs.readFile(source));assert.equal(unknown.type,'audio');assert.match(unknown.fileUrl,/\.bin$/);const response=await fetch(base+unknown.fileUrl);assert.match(response.headers.get('content-type')||'',/application\/octet-stream/);assert.equal(response.headers.get('x-content-type-options'),'nosniff');await response.arrayBuffer();}}
   const asset=await upload(name,await fs.readFile(source));assert.equal(asset.type,format==='flac'?'audio':'video');
   const preview=await fetch(base+'/api/media-preview/'+path.basename(asset.fileUrl));assert.equal(preview.status,200);await preview.arrayBuffer();
  }

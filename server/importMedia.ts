@@ -13,7 +13,9 @@ export async function receiveMedia(req:Request) {
   try {name=path.basename(decodeURIComponent(req.get('x-filename')||'media'));}
   catch {throw new InputError('Nome del file non valido.');}
   const extension=path.extname(name).toLowerCase();
-  const ext=/^\.[a-z0-9]{1,12}$/.test(extension)?extension:'.bin';
+  // Unknown names still import by content; never serve uploaded HTML/JS as active web content.
+  const mediaExtensions=new Set('.mp4 .mov .avi .mkv .webm .m4v .mxf .mts .m2ts .ts .mpg .mpeg .vob .ogv .3gp .3g2 .flv .wmv .asf .mp3 .wav .m4a .aac .flac .aif .aiff .ogg .opus .wma .ac3 .dts .amr .caf .au .ape .alac .mp2 .png .jpg .jpeg .webp'.split(' '));
+  const ext=mediaExtensions.has(extension)?extension:'.bin';
   const file=path.join(downloadsDir,`upload_${randomUUID()}${ext}`);
   let received=0;
   const count=new Transform({transform(chunk,_encoding,callback){received+=chunk.length;callback(null,chunk);}});
