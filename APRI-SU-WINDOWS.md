@@ -7,7 +7,7 @@ Salva il progetto, conserva la vecchia cartella e chiudi anche la vecchia finest
 nera prima di aprire la versione aggiornata dall’icona sul desktop.
 
 1. Salva il progetto e chiudi TALEDIT e la vecchia finestra nera di avvio.
-2. [Scarica **TALEDIT-Setup.exe**](https://github.com/talonet73/MyTalonet/releases/download/taledit-windows-254868b1592a/TALEDIT-Setup.exe).
+2. [Scarica **TALEDIT-Setup.exe**](https://github.com/talonet73/TALEDIT/releases/download/taledit-windows-254868b1592a/TALEDIT-Setup.exe).
 3. Apri il file e premi **Avanti**, poi **Installa**, quindi **Fine**.
 4. Le volte successive apri **TALEDIT** dall’icona sul desktop.
 

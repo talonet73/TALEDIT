@@ -2,10 +2,10 @@
 
 **Verifica completata e installer pubblicato.**
 
-[Scarica TALEDIT-Setup.exe](https://github.com/talonet73/MyTalonet/releases/download/taledit-windows-254868b1592a/TALEDIT-Setup.exe) ·
+[Scarica TALEDIT-Setup.exe](https://github.com/talonet73/TALEDIT/releases/download/taledit-windows-254868b1592a/TALEDIT-Setup.exe) ·
 [Esecuzione Windows riuscita](https://github.com/talonet73/MyTalonet/actions/runs/41851722336).
 
-Codice incluso: [`254868b1592a`](https://github.com/talonet73/MyTalonet/tree/254868b1592a17ccf2511e98d72668f698aa687d).
+Codice incluso: [`254868b1592a`](https://github.com/talonet73/TALEDIT/tree/254868b1592a17ccf2511e98d72668f698aa687d).
 
 Il caso segnalato è un WAV di 169,6 secondi con pausa da conservare di 0,7 secondi.
 L'errore `Unrecognized option 'filter_complex_script'` si verifica prima della lettura
