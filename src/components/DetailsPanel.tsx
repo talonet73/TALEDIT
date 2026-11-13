@@ -16,7 +16,7 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
   const currentTrack = tracks.find(t => t.id === selectedClip?.trackId);
 
   return (
-    <div className="w-64 bg-[#111622] text-white p-3.5 border-l border-[#1e293b] flex flex-col justify-between text-xs select-none">
+    <div className="w-full h-full overflow-y-auto bg-[#111622] text-white p-3.5 border-l border-[#1e293b] flex flex-col justify-between text-xs select-none">
       <div>
         {/* Header */}
         <div className="flex items-center justify-between pb-2 border-b border-[#232c40] mb-3">
@@ -39,6 +39,7 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
               />
             </div>
 
+            {selectedClip.type==='text' && <label className="block">Testo della clip<textarea aria-label="Testo della clip" value={selectedClip.text || ''} onChange={e=>onUpdateClip({text:e.target.value,name:e.target.value.slice(0,35)})} className="w-full p-2 mt-2 bg-orange-950 rounded"/></label>}
             {/* TIPO */}
             <div>
               <span className="block text-[10px] uppercase font-bold text-gray-400 tracking-wider">
@@ -60,6 +61,7 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
                     EFFECT
                   </span>
                 )}
+                {selectedClip.type==='text' && <span className="text-orange-300">TESTO</span>}
                 {selectedClip.type === 'image' && (
                   <span className="text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800">
                     IMMAGINE
@@ -69,6 +71,10 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
             </div>
 
             {/* DURATA */}
+            {selectedClip.type==='effect' && <section aria-label="Controlli effetto" className="space-y-4 p-3 rounded border border-rose-700 bg-rose-950/30">
+              <strong className="text-rose-200">Controlli effetto</strong>
+              {([{key:'intensity',label:'Intensità'},{key:'speed',label:'Velocità'}] as const).map(({key,label})=><label key={key} className="block"><span className="flex justify-between"><span>{label}</span><output>{selectedClip[key] ?? 5} / 10</output></span><input aria-label={label} type="range" min="0" max="10" step="0.1" value={selectedClip[key] ?? 5} onChange={e=>onUpdateClip({[key]:Number(e.target.value)})} className="w-full accent-rose-400"/></label>)}
+            </section>}
             <div>
               <span className="block text-[10px] uppercase font-bold text-gray-400 tracking-wider">
                 DURATA
@@ -94,11 +100,11 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
               <span className="block text-[10px] uppercase font-bold text-gray-400 tracking-wider">
                 OPACITÀ / VOLUME
               </span>
-              {selectedClip.type === 'video' || selectedClip.type === 'image' ? (
+              {selectedClip.type === 'video' || selectedClip.type === 'image' || selectedClip.type==='text' ? (
                 <div className="mt-1.5 space-y-1">
                   <div className="flex justify-between text-[11px] font-mono">
                     <span className={selectedClip.type === 'image' ? 'text-amber-400' : 'text-cyan-400'}>
-                      Trasparenza:
+                      Opacità:
                     </span>
                     <span className="font-bold text-white">{selectedClip.transparency}%</span>
                   </div>
@@ -151,7 +157,7 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
                       min="0"
                       max={selectedClip.duration / 2}
                       value={selectedClip.fadeIn}
-                      onChange={e => onUpdateClip({ fadeIn: parseFloat(e.target.value) || 0 })}
+                      onChange={e => onUpdateClip({ fadeIn: Math.max(0,Math.min(selectedClip.duration/2,parseFloat(e.target.value) || 0)) })}
                       className="w-16 bg-[#1a2030] border border-[#2d3748] rounded px-1.5 py-0.5 text-right text-xs text-white"
                     />
                     <span className="text-[10px] text-gray-400">s</span>
@@ -167,7 +173,7 @@ export const DetailsPanel: React.FC<DetailsPanelProps> = ({
                       min="0"
                       max={selectedClip.duration / 2}
                       value={selectedClip.fadeOut}
-                      onChange={e => onUpdateClip({ fadeOut: parseFloat(e.target.value) || 0 })}
+                      onChange={e => onUpdateClip({ fadeOut: Math.max(0,Math.min(selectedClip.duration/2,parseFloat(e.target.value) || 0)) })}
                       className="w-16 bg-[#1a2030] border border-[#2d3748] rounded px-1.5 py-0.5 text-right text-xs text-white"
                     />
                     <span className="text-[10px] text-gray-400">s</span>

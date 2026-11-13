@@ -1,3 +1,4 @@
+import {DraggableWindow} from './DraggableWindow';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   X,
@@ -20,29 +21,35 @@ import {
   executeProjectExport,
   ExportProgress
 } from '../services/exportService';
-import { playbackEngine } from '../services/playbackEngine';
+import {EXPORT_FORMATS,categoryOf,type ExportCategory} from '../services/exportFormats';
+import { PlaybackEngine, playbackEngine } from '../services/playbackEngine';
 
 interface ExportModalProps {
+  audioMaster?:import('../services/audioMixer').AudioSettings;
   isOpen: boolean;
   onClose: () => void;
   clips: TimelineClip[];
   tracks: Track[];
   subtitles: SubtitleItem[];
   aspectRatio: string;
+  currentTime:number;
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
+  audioMaster,
   isOpen,
   onClose,
   clips,
   tracks,
   subtitles,
-  aspectRatio,
+  aspectRatio,currentTime,
 }) => {
+  const [category,setCategory]=useState<ExportCategory>('video');
   const [format, setFormat] = useState<ExportFormat>('mp4');
   const [resolution, setResolution] = useState<'1080p' | '720p' | '4K'>('1080p');
   // Horizontal slider for file weight/bitrate (1 = lightest, 100 = heaviest/max quality)
   const [weightPercentage, setWeightPercentage] = useState<number>(55);
+  const [exportError, setExportError] = useState('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [exportedResult, setExportedResult] = useState<{
@@ -51,13 +58,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     actualSizeBytes: number;
   } | null>(null);
 
+  const hasImages=clips.some(c=>c.type==='image' && tracks.some(t=>t.id===c.trackId && t.type==='image'));
+  const [frameTime,setFrameTime]=useState(currentTime);
+  useEffect(()=>{if(isOpen){setFrameTime(currentTime);if(category==='image'&&!hasImages){setCategory('video');setFormat('mp4');}}},[isOpen]);
   const exportCanvasRef = useRef<HTMLCanvasElement>(null);
 
   // Content duration
   const contentDuration = useMemo(() => {
-    if (clips.length === 0) return 8;
+    if (clips.length === 0) return 0;
     const maxEnd = Math.max(...clips.map(c => c.startTime + c.duration));
-    return Math.max(2, Math.ceil(maxEnd));
+    return maxEnd;
   }, [clips]);
 
   // Dynamic file size and bitrate calculation based on horizontal slider
@@ -65,86 +75,97 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     return estimateExportFileSizeMB(format, contentDuration, weightPercentage, resolution);
   }, [format, contentDuration, weightPercentage, resolution]);
 
+  useEffect(() => { if(isOpen){setExportedResult(null);setExportError('');setProgress(null);} },[isOpen]);
+
   // When modal opens, draw current initial frame on canvas
   useEffect(() => {
     if (!isOpen) return;
     const canvas = exportCanvasRef.current;
     if (!canvas) return;
 
-    const videoClips = clips
-      .filter(c => c.type === 'video')
+    const previewClips=clips.filter(c=>!tracks.find(t=>t.id===c.trackId)?.isMuted && (!tracks.some(t=>t.isSolo)||tracks.find(t=>t.id===c.trackId)?.isSolo));
+    const videoClips = previewClips
+      .filter(c => c.type === 'video' && category!=='image')
       .map(c => ({
         id: c.id,
-        name: c.name,
+        name: c.name,speedLevel:c.speedLevel,
         transparency: c.transparency,
+      effects: c.effects, adjustments: c.adjustments,colorGrade:c.colorGrade,mask:c.mask, fadeIn:c.fadeIn, fadeOut:c.fadeOut,
+        layer: clips.indexOf(c),
         startTime: c.startTime,
         duration: c.duration,
         offset: c.offset,
         mediaUrl: c.mediaUrl,
       }));
 
-    const effectClips = clips
+    const effectClips = previewClips
       .filter(c => c.type === 'effect')
       .map(c => ({
         id: c.id,
-        name: c.name,
+        name: c.name,speedLevel:c.speedLevel,
         fadeIn: c.fadeIn,
         fadeOut: c.fadeOut,
         startTime: c.startTime,
         duration: c.duration,
-        effectType: c.effectType,
+        intensity:c.intensity,speed:c.speed,offset:c.offset,effectSpan:c.effectSpan,
+      effectType: c.effectType,
       }));
 
-    const imageClips = clips
+    const imageClips = previewClips
       .filter(c => c.type === 'image')
       .map(c => ({
         id: c.id,
-        name: c.name,
+        name: c.name,speedLevel:c.speedLevel,
         transparency: c.transparency,
+      effects: c.effects, adjustments: c.adjustments,colorGrade:c.colorGrade,mask:c.mask, fadeIn:c.fadeIn, fadeOut:c.fadeOut,
+        layer: clips.indexOf(c),
         startTime: c.startTime,
         duration: c.duration,
         mediaUrl: c.mediaUrl,
       }));
 
-    const subItems = subtitles.map(s => ({
-      text: s.text,
-      startTime: s.startTime,
-      endTime: s.endTime,
-    }));
+    const subItems = subtitles;
 
     // Draw first frame preview
-    const previewStartTime = videoClips.length > 0 ? videoClips[0].startTime : 0;
-    playbackEngine.prepareAndRenderFrame(canvas, previewStartTime, videoClips, effectClips, imageClips, subItems);
-  }, [isOpen, clips, subtitles]);
+    const previewStartTime = category==='image'?frameTime:videoClips.length > 0 ? videoClips[0].startTime : 0;
+    const previewEngine = new PlaybackEngine();
+    previewEngine.prepareAndRenderFrame(canvas, previewStartTime, videoClips, effectClips, imageClips, subItems);
+    return () => previewEngine.dispose();
+  }, [isOpen, clips, tracks,subtitles,category,frameTime]);
 
   if (!isOpen) return null;
 
-  const isAudioFormat = format === 'mp3' || format === 'wav';
+  const isAudioFormat = category==='audio';
+  const isImageFormat=category==='image';
 
   const handleStartExport = async () => {
     const canvas = exportCanvasRef.current;
     if (!canvas) return;
 
     setIsExporting(true);
+    setExportError('');
     setExportedResult(null);
 
     try {
       const result = await executeProjectExport(
         {
-          format,
+          format,audioMaster,
           resolution,
           weightPercentage,
           durationSec: contentDuration,
+          aspectRatio,frameTime,
         },
         clips,
         subtitles,
         canvas,
-        p => setProgress(p)
+        p => setProgress(p),
+        tracks
       );
 
       setExportedResult(result);
     } catch (err) {
-      console.error('Export error:', err);
+      setExportError((err as Error).message);
+      setProgress(null);
     } finally {
       setIsExporting(false);
     }
@@ -166,10 +187,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const handleDownloadProjectJSON = () => {
     const projectData = {
       appName: 'TALEDIT',
-      version: '1.0.0',
+      version: '2.1.0',captionWorkflow:'timeline',
       exportedAt: new Date().toISOString(),
-      aspectRatio,
-      tracks,
+      aspectRatio,currentTime,
+      tracks,audioMaster,
       clips,
       subtitles,
     };
@@ -185,20 +206,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150 select-none">
-      <div className="w-full max-w-xl bg-[#0e1422] border border-[#2b3a54] rounded-2xl shadow-2xl p-5 text-white flex flex-col max-h-[94vh] overflow-hidden">
+    <div role="dialog" aria-label="Esportazione" className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-150 select-none">
+      <DraggableWindow className="w-full max-w-xl bg-[#0e1422] border border-[#2b3a54] rounded-2xl shadow-2xl p-5 text-white flex flex-col max-h-[94vh] overflow-hidden">
         {/* Modal Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-[#1f2a3f] mb-3 shrink-0">
+        <div data-window-handle className="flex items-center justify-between pb-3 border-b border-[#1f2a3f] mb-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-cyan-950 border border-cyan-800 flex items-center justify-center text-cyan-400">
               {isAudioFormat ? <Music className="w-4 h-4" /> : <Film className="w-4 h-4" />}
             </div>
             <div>
-              <h3 className="font-bold text-sm text-cyan-300">Esporta Video ed Audio TALEDIT</h3>
-              <p className="text-[10px] text-gray-400">Rendering reale con anteprima visiva in tempo reale e controllo peso file</p>
+              <h3 className="font-bold text-sm text-cyan-300">Esporta TALEDIT</h3>
+              <p className="text-[10px] text-gray-400">Codifica FFmpeg con anteprima e controllo peso file</p>
             </div>
           </div>
           <button
+            aria-label="Chiudi esportazione"
             onClick={onClose}
             disabled={isExporting}
             className="text-gray-400 hover:text-white p-1 rounded-md hover:bg-[#1a2334] transition-colors disabled:opacity-40"
@@ -220,7 +242,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             {isExporting && (
               <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-rose-600/90 text-white font-mono text-[10px] font-bold flex items-center gap-1.5 shadow">
                 <span className="w-2 h-2 rounded-full bg-white animate-ping" />
-                <span>REC • LIVE ANTEPRIMA</span>
+                <span>CODIFICA IN CORSO</span>
               </div>
             )}
             <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 text-gray-300 font-mono text-[10px] border border-white/10">
@@ -228,17 +250,20 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           </div>
 
+          {exportError && <p role="alert" className="text-rose-300 border border-rose-700 rounded p-2">{exportError}</p>}
           {!exportedResult ? (
             <>
               {/* 1. Formato file selector (mp4, avi, mov, mp3, wav) */}
               <div>
                 <label className="block text-gray-300 font-semibold mb-1 flex items-center justify-between">
                   <span>Formato di Esportazione</span>
-                  <span className="text-[10px] text-gray-400">Video (.mp4, .avi, .mov) o Audio (.mp3, .wav)</span>
+                  <span className="text-[10px] text-gray-400">Video, audio o immagine dalla pista IMMAGINI</span>
                 </label>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {(['mp4', 'avi', 'mov', 'mp3', 'wav'] as ExportFormat[]).map(fmt => {
-                    const isFmtAudio = fmt === 'mp3' || fmt === 'wav';
+                <div role="group" aria-label="Tipo di esportazione" className="flex gap-2 my-2">{(['video','audio','image'] as const).map(kind=><button type="button" key={kind} aria-pressed={category===kind} disabled={isExporting || (kind==='image'&&!hasImages)} title={kind==='image'&&!hasImages?'Popola la pista IMMAGINI':''} onClick={()=>{setCategory(kind);setFormat(EXPORT_FORMATS[kind][0]);setExportedResult(null);setExportError('');}} className="p-2 rounded border border-slate-500 disabled:opacity-40 aria-pressed:bg-cyan-800">{kind==='video'?'Video':kind==='audio'?'Audio':'Immagine'}</button>)}</div>
+                {isImageFormat && <label className="block my-2">Fotogramma (secondi)<input aria-label="Fotogramma (secondi)" type="number" min="0" max={contentDuration} step="0.04" value={frameTime} onChange={e=>setFrameTime(Math.max(0,Number(e.target.value)||0))} className="ml-2 p-1 bg-slate-800 rounded"/></label>}
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(EXPORT_FORMATS[category] as readonly ExportFormat[]).map(fmt => {
+                    const isFmtAudio = categoryOf(fmt)==='audio';
                     const isSelected = format === fmt;
                     return (
                       <button
@@ -256,7 +281,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       >
                         <span className="text-xs">.{fmt}</span>
                         <span className="text-[8px] font-sans font-normal opacity-75">
-                          {isFmtAudio ? 'Audio' : 'Video'}
+                          {category==='image'?'Immagine':isFmtAudio ? 'Audio' : 'Video'}
                         </span>
                       </button>
                     );
@@ -298,11 +323,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-cyan-300 font-bold">
                     <Sliders className="w-4 h-4 text-cyan-400" />
-                    <span>Barra Regolazione Peso File ed Encoding</span>
+                    <span>{['wav','aiff'].includes(format)?'PCM: qualità e peso fissi':'Barra Regolazione Peso File ed Encoding'}</span>
                   </div>
                   <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 font-mono text-[11px] font-bold border border-cyan-800">
                     <HardDrive className="w-3.5 h-3.5" />
-                    <span>Peso stimato: ~{sizeEstimate.estimatedMB} MB</span>
+                    <span>{isImageFormat?'Dimensione disponibile dopo l’esportazione':`Peso stimato: ~${sizeEstimate.estimatedMB} MB`}</span>
                   </div>
                 </div>
 
@@ -313,8 +338,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     min="1"
                     max="100"
                     value={weightPercentage}
+                    aria-label="Peso del file"
                     onChange={e => setWeightPercentage(Number(e.target.value))}
-                    disabled={isExporting}
+                    disabled={isExporting || ['wav','aiff','flac','png','bmp','tiff','gif'].includes(format)}
                     className="w-full h-2.5 bg-[#1e293b] rounded-lg appearance-none cursor-pointer accent-cyan-400"
                   />
                   <div className="flex justify-between text-[10px] text-gray-400 font-medium">
@@ -335,7 +361,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   <div className="flex items-center gap-1.5 text-gray-300">
                     <Gauge className="w-3.5 h-3.5 text-amber-400" />
                     <span>Bitrate:</span>
-                    <span className="font-mono font-bold text-white">{sizeEstimate.bitrateFormatted}</span>
+                    <span className="font-mono font-bold text-white">{isImageFormat?'Non applicabile':sizeEstimate.bitrateFormatted}</span>
                   </div>
                   <div className="flex items-center gap-1.5 text-gray-300">
                     <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
@@ -369,7 +395,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <button
                   type="button"
                   onClick={handleStartExport}
-                  disabled={isExporting}
+                  disabled={isExporting || clips.length === 0}
                   className="w-full py-2.5 px-4 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-950/50 cursor-pointer"
                 >
                   {isExporting ? (
@@ -377,7 +403,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   ) : (
                     <>
                       <Download className="w-4 h-4" />
-                      <span>Avvia Rendering ed Esporta in .{format.toUpperCase()} (~{sizeEstimate.estimatedMB} MB)</span>
+                      <span>Avvia Rendering ed Esporta in .{format.toUpperCase()}{isImageFormat?'':` (~${sizeEstimate.estimatedMB} MB)`}</span>
                     </>
                   )}
                 </button>
@@ -445,7 +471,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           )}
         </div>
-      </div>
+      </DraggableWindow>
     </div>
   );
 };

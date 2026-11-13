@@ -1,9 +1,27 @@
+import {joinSelectedClips,expandCompoundClips} from './services/compoundClips';
+import {validateCaptionClip} from './services/karaoke';
+import {FullscreenTools} from './components/FullscreenTools';
+import {SmartCutPanel} from './components/SmartCutPanel';
+import {rippleRemove} from './services/smartCut';
+import {validateMask} from './services/penMask';
+import {ColorPanel} from './components/ColorPanel';
+import {validateGrade} from './services/colorGrade';
+import {AudioMixer} from './components/AudioMixer';
+import {validateAudio,type AudioSettings} from './services/audioMixer';
+import {changeClipSpeed,clipRate,validSpeedLevel} from './services/clipSpeed';
+import {duplicateTrack} from './services/duplicateTrack';
+import {downloadScreenshot} from './services/screenshotDownload';
 /**
  * TALEDIT - Video Editor con Claude DT MCP Integration
  * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { EditingToolsPanel } from './components/EditingToolsPanel';
+import {captionClips,timelineSubtitles,textTrack} from './services/captionClips';
+import {BGRemoverPanel} from './components/BGRemoverPanel';
+import { applyCrossDissolve, makeEffectClip, type VisualEffect } from './services/visualSettings';
+import {allowedOnTrack, normalizeTrackAssignments} from './services/trackRules';
 import { TopNav } from './components/TopNav';
 import { MediaLibraryPanel, initialMediaAssets } from './components/MediaLibraryPanel';
 import { CaptionsPanel } from './components/CaptionsPanel';
@@ -22,8 +40,13 @@ import {
   TrackType,
 } from './types/editor';
 import { executeClaudePrompt, formatTimecode } from './services/mcpEngine';
+import { importMediaFile } from './services/mediaService';
+import { activeTimelineClips } from './services/timelineMedia';
+import { applyTimelineTool } from './services/timelineTools';
+import { useEditorSync } from './services/useEditorSync';
 
 const INITIAL_TRACKS: Track[] = [
+  {...textTrack(),id:"track_text_1"},
   {
     id: 'track_effects',
     name: 'EFFECTS',
@@ -62,8 +85,8 @@ const INITIAL_TRACKS: Track[] = [
   },
   {
     id: 'track_image_1',
-    name: 'AUDIO 02 (Immagini)',
-    type: 'audio',
+    name: 'IMMAGINI',
+    type: 'image',
     isSolo: false,
     isMuted: false,
     headerBg: '#0d3324',
@@ -71,101 +94,22 @@ const INITIAL_TRACKS: Track[] = [
   },
 ];
 
-const INITIAL_CLIPS: TimelineClip[] = [
-  {
-    id: 'clip_effect_1',
-    name: 'Camera Handed',
-    trackId: 'track_effects',
-    type: 'effect',
-    startTime: 4,
-    duration: 8,
-    offset: 0,
-    color: '#cb5c5b',
-    transparency: 100,
-    volumeDb: 0,
-    fadeIn: 1.5,
-    fadeOut: 1.5,
-    effectType: 'camera_shake',
-  },
-  {
-    id: 'clip_video_1',
-    name: 'Intro01.mp4',
-    trackId: 'track_video_1',
-    type: 'video',
-    startTime: 0,
-    duration: 14,
-    offset: 0,
-    color: '#2563eb',
-    transparency: 100,
-    volumeDb: 0,
-    fadeIn: 0,
-    fadeOut: 0,
-    linkedClipId: 'clip_audio_1',
-    isLinked: true,
-    assetId: 'stage_video_1',
-    mediaUrl: '/media_downloads/yt_1792223085761_ebms.mp4',
-  },
-  {
-    id: 'clip_audio_1',
-    name: 'Intro01.mp4 [Audio]',
-    trackId: 'track_audio_1',
-    type: 'audio',
-    startTime: 0,
-    duration: 14,
-    offset: 0,
-    color: '#10b981',
-    transparency: 100,
-    volumeDb: 0,
-    fadeIn: 0,
-    fadeOut: 0,
-    linkedClipId: 'clip_video_1',
-    isLinked: true,
-    assetId: 'stage_video_1',
-    mediaUrl: '/media_downloads/yt_1792223085761_ebms.mp4',
-  },
-  {
-    id: 'clip_image_1',
-    name: 'Overlay_Grafica.png',
-    trackId: 'track_image_1',
-    type: 'image',
-    startTime: 12,
-    duration: 9,
-    offset: 0,
-    color: '#eab308',
-    transparency: 100,
-    volumeDb: 0,
-    fadeIn: 0,
-    fadeOut: 0,
-    assetId: 'stage_image_1',
-  },
-];
-
-const INITIAL_SUBTITLES: SubtitleItem[] = [
-  {
-    id: 'sub_1',
-    startTime: 7.0,
-    endTime: 12.0,
-    text: "Intro01: Benvenuti nel video montato con TALEDIT.",
-    translation: "Welcome to the video edited with TALEDIT.",
-  },
-  {
-    id: 'sub_2',
-    startTime: 12.5,
-    endTime: 18.0,
-    text: "Integrazione attiva tramite Model Context Protocol (MCP).",
-    translation: "Active integration via Model Context Protocol (MCP).",
-  },
-];
+const INITIAL_CLIPS: TimelineClip[] = [];
+const INITIAL_SUBTITLES: SubtitleItem[] = [];
 
 export default function App() {
+  const [workspace,setWorkspace]=useState<'video'|'audio'|'color'>('video');
+  const [audioMaster,setAudioMaster]=useState<AudioSettings>({});
+  const audioMasterRef=useRef(audioMaster);audioMasterRef.current=audioMaster;
   // Timeline State
   const [tracks, setTracks] = useState<Track[]>(INITIAL_TRACKS);
   const [clips, setClips] = useState<TimelineClip[]>(INITIAL_CLIPS);
-  const [currentTime, setCurrentTime] = useState<number>(18.0); // 00:18 playhead matching screenshot
-  const [totalDuration, setTotalDuration] = useState<number>(273); // 00:04:33:00 matching screenshot
+  const [currentTime, setCurrentTime] = useState<number>(0); // 00:18 playhead matching screenshot
+  const [totalDuration, setTotalDuration] = useState<number>(30); // 00:04:33:00 matching screenshot
+  const [screenshotBusy,setScreenshotBusy]=useState(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>('clip_video_1');
-  const [selectedClipIds, setSelectedClipIds] = useState<string[]>(['clip_video_1']);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
   const [zoom, setZoom] = useState<number>(24);
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '1:1' | '4:3'>('16:9');
   const [isMutedMaster, setIsMutedMaster] = useState<boolean>(false);
@@ -177,34 +121,21 @@ export default function App() {
   const [subtitles, setSubtitles] = useState<SubtitleItem[]>(INITIAL_SUBTITLES);
 
   // Tabs & Toolbars
-  const [activeTab, setActiveTab] = useState<string>('Effects');
+  const [animatedCaptions,setAnimatedCaptions]=useState(true);
+  const [activeTab, setActiveTab] = useState<string>('');
   const [isMicActive, setIsMicActive] = useState<boolean>(false);
 
   // Claude DT MCP Integration State
   // User manually decides when to turn ON or OFF as explicitly requested!
   const [claudeConnected, setClaudeConnected] = useState<boolean>(false);
+  const [mcpProvider, setMcpProvider] = useState<'claude' | 'chatgpt'>('claude');
   const [isClaudeDialogOpen, setIsClaudeDialogOpen] = useState<boolean>(false);
   const [isThinking, setIsThinking] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [trackConstraintWarning, setTrackConstraintWarning] = useState<string | null>(null);
 
   // Markers State
-  const [markers, setMarkers] = useState<TimelineMarker[]>([
-    {
-      id: 'marker_1',
-      time: 7.0,
-      name: 'Inizio Intro',
-      description: 'Punto di avvio del video Intro01 e musica di sottofondo',
-      color: '#f59e0b',
-    },
-    {
-      id: 'marker_2',
-      time: 18.0,
-      name: 'Transizione FX',
-      description: 'Dissolvenza effetto Camera Handed e stacco verso seconda inquadratura',
-      color: '#ef4444',
-    },
-  ]);
+  const [markers, setMarkers] = useState<TimelineMarker[]>([]);
 
   // Media Library Assets State
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>(initialMediaAssets);
@@ -227,15 +158,19 @@ export default function App() {
   const talFileInputRef = useRef<HTMLInputElement>(null);
   // Hidden file input ref for importing media (.mp4, .mov, .avi, .mp3, .wav, .png, .jpg) into stage
   const mediaFileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   // Clipboard & 10-step Undo History (Request #1)
-  const [clipboardClip, setClipboardClip] = useState<TimelineClip | null>(null);
+  const [clipboardClip, setClipboardClip] = useState<TimelineClip[] | null>(null);
   const clipsRef = useRef<TimelineClip[]>(clips);
   useEffect(() => {
     clipsRef.current = clips;
   }, [clips]);
 
-  const historyRef = useRef<TimelineClip[][]>([INITIAL_CLIPS]);
+  const tracksRef = useRef<Track[]>(tracks);
+  useEffect(() => { tracksRef.current=tracks; },[tracks]);
+  const markersRef=useRef(markers);markersRef.current=markers;const subtitlesRef=useRef(subtitles);subtitlesRef.current=subtitles;
+  const historyRef = useRef<{clips:TimelineClip[];tracks:Track[];audioMaster?:AudioSettings;markers?:TimelineMarker[];subtitles?:SubtitleItem[]}[]>([{clips:INITIAL_CLIPS,tracks:INITIAL_TRACKS}]);
   const historyIndexRef = useRef<number>(0);
   const [historyCount, setHistoryCount] = useState<number>(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -245,23 +180,24 @@ export default function App() {
       id: 'init_msg_1',
       role: 'claude',
       content:
-        'Benvenuto in TALEDIT con Claude DT MCP! Sono pronto a manipolare la timeline direttamente dai tuoi prompt. Puoi accendere o spegnere il collegamento in qualsiasi momento dal pulsante in alto. Prova a digitare: "Taglia a 00:15", "Imposta trasparenza al 70%" o "Alza volume a +3dB".',
+        'Benvenuto in TALEDIT! La console locale interpreta comandi di montaggio. Claude e ChatGPT si collegano tramite gli endpoint MCP nella scheda di configurazione. Puoi accendere o spegnere il collegamento in qualsiasi momento dal pulsante in alto. Prova a digitare: "Taglia a 00:15", "Imposta trasparenza al 70%" o "Alza volume a +3dB".',
       timestamp: 'Adesso',
     },
   ]);
 
   // Push new move to history (maintains up to 10 moves)
-  const pushHistory = useCallback((newClips: TimelineClip[]) => {
+  const pushHistory = useCallback((newClips: TimelineClip[], newTracks=tracksRef.current,newMaster=audioMasterRef.current,metadata={markers:markersRef.current,subtitles:subtitlesRef.current}) => {
+    const snapshot={clips:newClips,tracks:newTracks,audioMaster:newMaster,...metadata};
     const currentIdx = historyIndexRef.current;
     const sliced = historyRef.current.slice(0, currentIdx + 1);
 
     // Skip duplicate states
     const last = sliced[sliced.length - 1];
-    if (last && JSON.stringify(last) === JSON.stringify(newClips)) {
+    if (last && JSON.stringify(last) === JSON.stringify(snapshot)) {
       return;
     }
 
-    let next = [...sliced, newClips];
+    let next = [...sliced, snapshot];
     // Keep up to 10 moves backward (11 snapshots total)
     if (next.length > 11) {
       next = next.slice(next.length - 11);
@@ -273,14 +209,31 @@ export default function App() {
     setHistoryCount(newIdx);
   }, []);
 
+  const sharedState = { audioMaster, clips, tracks, subtitles, mediaAssets, currentTime, selectedClipId, aspectRatio };
+  useEditorSync(sharedState, remote => {
+    const normalized=normalizeTrackAssignments(remote.clips,remote.tracks);remote={...remote,...normalized};
+    if(remote.selectedClipId&&!clipsRef.current.some(c=>c.id===remote.selectedClipId))setIsPlaying(false);
+    setClips(remote.clips); clipsRef.current = remote.clips; pushHistory(remote.clips,remote.tracks,remote.audioMaster||{});
+    setAudioMaster(remote.audioMaster||{});
+    setTracks(remote.tracks); setSubtitles(remote.subtitles); setMediaAssets(remote.mediaAssets);
+    setCurrentTime(remote.currentTime); setSelectedClipId(remote.selectedClipId);
+    setSelectedClipIds(remote.selectedClipId ? [remote.selectedClipId] : []);
+    setAspectRatio(remote.aspectRatio);
+  }, setClaudeConnected, setTrackConstraintWarning);
+  useEffect(() => { setTotalDuration(Math.max(30, ...clips.map(c => c.startTime + c.duration))); }, [clips]);
+
   // Undo (Ctrl+Z): goes back 1 move, up to 10 moves
   const handleUndo = useCallback(() => {
     if (historyIndexRef.current > 0) {
       const prevIdx = historyIndexRef.current - 1;
       historyIndexRef.current = prevIdx;
       setHistoryCount(prevIdx);
-      const targetClips = historyRef.current[prevIdx];
+      const snapshot = historyRef.current[prevIdx];
+      const targetClips = snapshot?.clips;
       if (targetClips) {
+        setTracks(snapshot.tracks);tracksRef.current=snapshot.tracks;setAudioMaster(snapshot.audioMaster||{});if(snapshot.markers)setMarkers(snapshot.markers);if(snapshot.subtitles)setSubtitles(snapshot.subtitles);
+        setSelectedClipId(id=>targetClips.some(c=>c.id===id)?id:null);
+        setSelectedClipIds(ids=>ids.filter(id=>targetClips.some(c=>c.id===id)));
         setClips(targetClips);
         clipsRef.current = targetClips;
         setToastMessage(`↩ Annulla (Ctrl+Z): tornato indietro di 1 mossa (${prevIdx}/10 mosse disponibili)`);
@@ -298,8 +251,12 @@ export default function App() {
       const nextIdx = historyIndexRef.current + 1;
       historyIndexRef.current = nextIdx;
       setHistoryCount(nextIdx);
-      const targetClips = historyRef.current[nextIdx];
+      const snapshot = historyRef.current[nextIdx];
+      const targetClips = snapshot?.clips;
       if (targetClips) {
+        setTracks(snapshot.tracks);tracksRef.current=snapshot.tracks;setAudioMaster(snapshot.audioMaster||{});if(snapshot.markers)setMarkers(snapshot.markers);if(snapshot.subtitles)setSubtitles(snapshot.subtitles);
+        setSelectedClipId(id=>targetClips.some(c=>c.id===id)?id:null);
+        setSelectedClipIds(ids=>ids.filter(id=>targetClips.some(c=>c.id===id)));
         setClips(targetClips);
         clipsRef.current = targetClips;
         setToastMessage(`↪ Ripristina (Ctrl+Y): avanti di 1 mossa`);
@@ -313,6 +270,12 @@ export default function App() {
     pushHistory(clipsRef.current);
   }, [pushHistory]);
 
+  useEffect(() => {
+    window.addEventListener('pointerup', handleCommitHistory);
+    window.addEventListener('mouseup', handleCommitHistory);
+    return () => { window.removeEventListener('pointerup', handleCommitHistory); window.removeEventListener('mouseup', handleCommitHistory); };
+  }, [handleCommitHistory]);
+
   // Playhead playback timer
   useEffect(() => {
     let animFrame: number;
@@ -320,9 +283,9 @@ export default function App() {
 
     const loop = (now: number) => {
       if (isPlaying) {
-        const delta = (now - lastTime) / 1000;
+        const delta = Math.max(0, (now - lastTime) / 1000);
         setCurrentTime(t => {
-          const next = t + delta;
+          const next = Math.max(0, t + delta);
           if (next >= totalDuration) {
             setIsPlaying(false);
             return totalDuration;
@@ -370,29 +333,34 @@ export default function App() {
   }, [resizingDivider]);
 
   // Duplicate Clip (CTRL+D)
+  const cloneAt = (source: TimelineClip[], time: number) => {
+    if (!source.length) return;
+    const ids = new Map(source.map(c => [c.id, crypto.randomUUID()]));
+    const origin = source[0].startTime;
+    const copies = source.map(c => ({ ...c, ...(c.type==='text'?{captionId:undefined}:{}), id: ids.get(c.id)!, startTime: time + c.startTime - origin,
+      linkedClipId: c.linkedClipId ? ids.get(c.linkedClipId) : undefined, isLinked: Boolean(c.linkedClipId && ids.has(c.linkedClipId)), name: `${c.name} (Copia)` }));
+    const normalized=normalizeTrackAssignments([...clips,...copies],tracks);
+    const updated=normalized.clips;setTracks(normalized.tracks);tracksRef.current=normalized.tracks;setClips(updated);clipsRef.current=updated;pushHistory(updated,normalized.tracks);
+    setSelectedClipId(copies[0].id); setSelectedClipIds([copies[0].id]);
+  };
+  const sourcePair = (id: string | null) => {
+    const target = clips.find(c => c.id === id);
+    if (!target) return [];
+    const pair = target.isLinked && clips.find(c => c.id === target.linkedClipId);
+    return pair ? [target, pair] : [target];
+  };
   const handleDuplicateClip = () => {
-    if (!selectedClipId) return;
-    const clip = clips.find(c => c.id === selectedClipId);
-    if (!clip) return;
-    const newClip: TimelineClip = {
-      ...clip,
-      id: `clip_${Date.now()}`,
-      name: `${clip.name} (Duplicato)`,
-      startTime: Math.round((clip.startTime + clip.duration) * 10) / 10,
-    };
-    const updated = [...clips, newClip];
-    setClips(updated);
-    pushHistory(updated);
-    setSelectedClipId(newClip.id);
+    const source = sourcePair(selectedClipId);
+    if (source.length) cloneAt(source, source[0].startTime + source[0].duration);
   };
 
   // Save TAL Project (CTRL+S)
   const handleSaveTalProject = () => {
     const projectData = {
       appName: 'TALEDIT',
-      version: '1.0.0',
+      version: '3.0.0',captionWorkflow:'timeline',
       savedAt: new Date().toISOString(),
-      tracks,
+      tracks,audioMaster,
       clips,
       markers,
       subtitles,
@@ -422,73 +390,58 @@ export default function App() {
       try {
         const content = evt.target?.result as string;
         const data = JSON.parse(content);
+        if (data.appName !== 'TALEDIT' || !Array.isArray(data.tracks) || !Array.isArray(data.clips) || data.clips.some((c: any) => !c.id || !['video','audio','image','effect','text'].includes(c.type) || !Number.isFinite(c.startTime) || c.startTime < 0 || !Number.isFinite(c.duration) || c.duration <= 0 || !validSpeedLevel(c.speedLevel))) throw new Error('Progetto TALEDIT non valido.');
+        expandCompoundClips(data.clips);
+        validateAudio(data.audioMaster);for(const t of data.tracks)validateAudio(t.audio);for(const c of data.clips){validateGrade(c.colorGrade);validateMask(c.mask);validateCaptionClip(c);}
+        setAudioMaster(data.audioMaster||{});
+        let normalized=normalizeTrackAssignments(data.clips,data.tracks);
+        if(!normalized.tracks.some(t=>t.type==='text'))normalized.tracks.push(textTrack());
+        if(data.captionWorkflow!=='timeline' && !data.clips.some((c:TimelineClip)=>c.type==='text') && data.subtitles?.length)normalized=captionClips(data.subtitles,normalized.clips,normalized.tracks,false,data.bilingualCaptions);
+        data.clips=normalized.clips;data.tracks=normalized.tracks;
         if (data.tracks) setTracks(data.tracks);
         if (data.clips) {
           setClips(data.clips);
-          pushHistory(data.clips);
+          pushHistory(data.clips,data.tracks || tracksRef.current,data.audioMaster||{},{markers:data.markers||[],subtitles:data.subtitles||[]});
         }
         if (data.markers) setMarkers(data.markers);
         if (data.subtitles) setSubtitles(data.subtitles);
         if (data.spokenLanguage) setSpokenLanguage(data.spokenLanguage);
         if (data.currentTime !== undefined) setCurrentTime(data.currentTime);
         if (data.mediaAssets) setMediaAssets(data.mediaAssets);
+        if (data.aspectRatio) setAspectRatio(data.aspectRatio);
+        if (data.bilingualCaptions !== undefined) setBilingualCaptions(data.bilingualCaptions);
+        setSelectedClipId(null); setSelectedClipIds([]);
       } catch (err) {
-        console.error('Error loading .tal project:', err);
+        setTrackConstraintWarning((err as Error).message);
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
 
-  // Import Media Files into Stage (.mp4, .mov, .avi, .mp3, .wav, .png, .jpg)
-  const handleMediaFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const allowedExtensions = ['.mp4', '.mov', '.avi', '.mp3', '.wav', '.png', '.jpg', '.jpeg'];
-
-    Array.from(files).forEach(file => {
-      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-      if (!allowedExtensions.includes(ext)) {
-        const sysErr: ClaudePromptMessage = {
-          id: `sys_err_${Date.now()}`,
-          role: 'system',
-          content: `⚠️ Formato "${ext}" non consentito. Il tasto Import accetta solo file multimediali (.mp4, .mov, .avi, .mp3, .wav, .png, .jpg). I progetti .tal e .json vanno aperti con il tasto "Apri".`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'error',
-        };
-        setClaudeMessages(prev => [...prev, sysErr]);
-        return;
+  const [mediaImportProgress,setMediaImportProgress]=useState<string | null>(null);
+  // Import files supported by the installed FFmpeg decoders.
+  const handleMediaFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []); e.target.value = '';
+    if(mediaImportProgress)return;
+    try {
+      for (const file of files) {
+        setMediaImportProgress(`${file.name}: 0%`);
+        const asset = await importMediaFile(file,percent=>setMediaImportProgress(percent===100?`${file.name}: analisi del file…`:`${file.name}: ${percent}%`));
+        setMediaAssets(prev => [...prev, asset]);
       }
-
-      const type: 'video' | 'audio' | 'image' =
-        file.type.startsWith('video') || ['.mp4', '.mov', '.avi'].includes(ext)
-          ? 'video'
-          : file.type.startsWith('audio') || ['.mp3', '.wav'].includes(ext)
-          ? 'audio'
-          : 'image';
-
-      const sysMsg: ClaudePromptMessage = {
-        id: `sys_${Date.now()}`,
-        role: 'system',
-        content: `File "${file.name}" importato con successo nello STAGE. Puoi trascinarlo o fare doppio clic per inserirlo nella timeline.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'success',
-      };
-      setClaudeMessages(prev => [...prev, sysMsg]);
-    });
-
-    e.target.value = '';
+    } catch (error) { setTrackConstraintWarning((error as Error).message); }
+    finally {setMediaImportProgress(null);}
   };
 
   // Delete Track and its clips
   const handleDeleteTrack = (trackId: string) => {
-    setTracks(prev => prev.filter(t => t.id !== trackId));
-    setClips(prev => {
-      const next = prev.filter(c => c.trackId !== trackId);
-      pushHistory(next);
-      return next;
-    });
+    const nextTracks=tracks.filter(t=>t.id!==trackId);
+    const removed=new Set(clips.filter(c=>c.trackId===trackId).map(c=>c.id));
+    const nextClips=clips.filter(c=>!removed.has(c.id)).map(c=>removed.has(c.linkedClipId || '')?{...c,linkedClipId:undefined,isLinked:false}:c);
+    setTracks(nextTracks);tracksRef.current=nextTracks;setClips(nextClips);clipsRef.current=nextClips;pushHistory(nextClips,nextTracks);
   };
+
 
 
   // Helper: verifica restrizioni rigide su quale traccia può ospitare ciascun tipo di media
@@ -497,157 +450,37 @@ export default function App() {
   // 3) Audio -> solo timeline audio
   // 4) Immagini -> solo timeline audio
   const isMediaAllowedOnTrack = (mediaType: 'effect' | 'video' | 'audio' | 'image', trackType: TrackType): boolean => {
-    if (mediaType === 'effect') return trackType === 'effect';
-    if (mediaType === 'video') return trackType === 'video';
-    if (mediaType === 'audio') return trackType === 'audio';
-    if (mediaType === 'image') return trackType === 'audio';
-    return false;
+    return allowedOnTrack(mediaType,trackType);
   };
 
   // Drag and drop asset directly from stage files into allowed timeline track
-  const handleDropAssetOnTrack = (asset: MediaAsset, trackId: string, dropTime: number) => {
-    const targetTrack = tracks.find(t => t.id === trackId);
-    if (!targetTrack) return;
-
-    // Controllo rigido sui vincoli di traccia
-    if (!isMediaAllowedOnTrack(asset.type, targetTrack.type)) {
-      let warning = '';
-      if (asset.type === 'video') warning = 'I video possono essere inseriti solo nella timeline dei video (traccia blu)!';
-      else if (asset.type === 'audio') warning = 'Gli audio possono essere inseriti solo nella timeline degli audio (traccia verde)!';
-      else if (asset.type === 'image') warning = 'Le immagini possono essere inserite solo nella timeline degli audio!';
-      else if (asset.type === 'effect') warning = 'Gli effetti possono essere inseriti solo nella timeline effetti (traccia rossa)!';
-
-      setTrackConstraintWarning(warning);
-      setTimeout(() => setTrackConstraintWarning(null), 3500);
-
-      const sysErr: ClaudePromptMessage = {
-        id: `sys_err_${Date.now()}`,
-        role: 'system',
-        content: `⚠️ Vincolo traccia: ${warning}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'error',
-      };
-      setClaudeMessages(prev => [...prev, sysErr]);
-      return;
-    }
-
-    const duration = asset.durationSec || 12;
-
-    if (asset.type === 'video') {
-      // Quando importi un video inserisce il video nella traccia blu ed il relativo audio nella traccia audio (agganciati insieme)
-      const audioTrack = tracks.find(t => t.type === 'audio') || tracks[3];
-      const now = Date.now();
-      const videoClipId = `clip_v_${now}`;
-      const audioClipId = `clip_a_${now}`;
-
-      const videoClip: TimelineClip = {
-        id: videoClipId,
-        name: asset.name,
-        trackId: targetTrack.id,
-        type: 'video',
-        startTime: dropTime,
-        duration,
-        offset: 0,
-        color: '#2563eb',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        linkedClipId: audioClipId,
-        isLinked: true,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-        mediaThumbnail: asset.thumbnailUrl,
-      };
-
-      const audioClip: TimelineClip = {
-        id: audioClipId,
-        name: `${asset.name} [Audio]`,
-        trackId: audioTrack ? audioTrack.id : 'track_audio_1',
-        type: 'audio',
-        startTime: dropTime,
-        duration,
-        offset: 0,
-        color: '#10b981',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        linkedClipId: videoClipId,
-        isLinked: true,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-      };
-
-      const next = [...clips, videoClip, audioClip];
-      setClips(next);
-      pushHistory(next);
-      setSelectedClipId(videoClipId);
-
-      const sysMsg: ClaudePromptMessage = {
-        id: `sys_${Date.now()}`,
-        role: 'system',
-        content: `Video "${asset.name}" inserito nella traccia Video e relativo audio nella traccia Audio (agganciati insieme).`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'success',
-      };
-      setClaudeMessages(prev => [...prev, sysMsg]);
-      return;
-    }
-
-    if (asset.type === 'audio') {
-      const newClip: TimelineClip = {
-        id: `clip_${Date.now()}`,
-        name: asset.name,
-        trackId: targetTrack.id,
-        type: 'audio',
-        startTime: dropTime,
-        duration,
-        offset: 0,
-        color: '#10b981',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-      };
-      const next = [...clips, newClip];
-      setClips(next);
-      pushHistory(next);
-      setSelectedClipId(newClip.id);
-      return;
-    }
-
-    if (asset.type === 'image') {
-      const newClip: TimelineClip = {
-        id: `clip_${Date.now()}`,
-        name: asset.name,
-        trackId: targetTrack.id,
-        type: 'image',
-        startTime: dropTime,
-        duration,
-        offset: 0,
-        color: '#eab308',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-        mediaThumbnail: asset.thumbnailUrl,
-      };
-      const next = [...clips, newClip];
-      setClips(next);
-      pushHistory(next);
-      setSelectedClipId(newClip.id);
-      return;
-    }
+  const addAsset = (asset: MediaAsset, trackId: string, time: number, preparedTracks = tracks) => {
+    try {
+      const next = applyTimelineTool({ ...sharedState, tracks: preparedTracks }, 'add_clip', { assetId: asset.id, trackId, timeSeconds: Math.max(0, time) });
+      setTracks(next.tracks); setClips(next.clips); pushHistory(next.clips,next.tracks);
+      setSelectedClipId(next.selectedClipId); setSelectedClipIds(next.selectedClipId ? [next.selectedClipId] : []);
+    } catch (error) { setTrackConstraintWarning((error as Error).message); }
+  };
+  const handleAddEffect = (type:VisualEffect, trackId?:string, time=currentTime) => {
+    let nextTracks=tracks;
+    let track=trackId?tracks.find(t=>t.id===trackId):tracks.find(t=>t.type==='effect');
+    if(trackId && track?.type!=='effect'){setTrackConstraintWarning('Gli effetti vanno soltanto nella traccia EFFECTS.');return;}
+    if(!track){track={id:crypto.randomUUID(),name:'EFFECTS',type:'effect',isMuted:false,isSolo:false,headerBg:'#35121b',laneBg:'#1e141a'};nextTracks=[...tracks,track];}
+    try {
+      const effect=makeEffectClip(type,track.id,time),next=[...clips,effect];
+      setTracks(nextTracks);tracksRef.current=nextTracks;setClips(next);clipsRef.current=next;pushHistory(next,nextTracks);
+      setSelectedClipId(effect.id);setSelectedClipIds([effect.id]);setActiveTab('');
+    }catch(error){setTrackConstraintWarning((error as Error).message);}
+  };
+  const handleDropAssetOnTrack = (asset: any, trackId: string, dropTime: number) => {
+    if(asset.type==='effect'){handleAddEffect(asset.effectType,trackId,dropTime);return;}
+    addAsset(asset, trackId, dropTime);
   };
 
   // Keyboard Shortcuts (CTRL+X, CTRL+C, CTRL+V, CTRL+D, CTRL+S, Space, Delete)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[data-stage="true"]'))) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
           e.preventDefault();
@@ -697,6 +530,8 @@ export default function App() {
       } else if (isCtrl && e.key.toLowerCase() === 'i') {
         e.preventDefault();
         mediaFileInputRef.current?.click();
+      } else if (isCtrl && e.key.toLowerCase() === 'e') {
+        e.preventDefault(); setIsPlaying(false); setIsExportModalOpen(true);
       } else if (e.code === 'Space') {
         e.preventDefault();
         setIsPlaying(p => !p);
@@ -714,7 +549,9 @@ export default function App() {
   // Toggle Claude Connection manually (User confirmed requirement)
   const handleToggleClaude = () => {
     const nextState = !claudeConnected;
-    setClaudeConnected(nextState);
+    fetch('/api/editor/connection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: nextState }) })
+      .then(response => { if (!response.ok) throw new Error('Collegamento MCP non modificato.'); setClaudeConnected(nextState); })
+      .catch(error => setTrackConstraintWarning(error.message));
 
     const logMsg: ClaudePromptMessage = {
       id: `conn_${Date.now()}`,
@@ -762,13 +599,14 @@ export default function App() {
 
       if (result.updatedClips) {
         setClips(result.updatedClips);
-        pushHistory(result.updatedClips);
+        pushHistory(result.updatedClips,result.updatedTracks || tracks);
       }
+      if (result.updatedTracks) { setTracks(result.updatedTracks);tracksRef.current=result.updatedTracks; }
       if (result.updatedTime !== undefined) {
         setCurrentTime(result.updatedTime);
       }
-      if (result.selectedClipId) {
-        setSelectedClipId(result.selectedClipId);
+      if (result.selectedClipId !== undefined) {
+        setSelectedClipId(result.selectedClipId);setSelectedClipIds(result.selectedClipId?[result.selectedClipId]:[]);
       }
       if (result.updatedSubtitles) {
         setSubtitles(result.updatedSubtitles);
@@ -790,7 +628,11 @@ export default function App() {
 
   // Cut Clip at Playhead
   const handleCutClip = () => {
-    handleSendPrompt('Taglia la clip al playhead');
+    try {
+      const next = applyTimelineTool(sharedState, 'cut_clip_at_time', { timeSeconds: currentTime });
+      setClips(next.clips); pushHistory(next.clips); setSelectedClipId(next.selectedClipId);
+      setSelectedClipIds(next.selectedClipId ? [next.selectedClipId] : []);
+    } catch (error) { setTrackConstraintWarning((error as Error).message); }
   };
 
   // Clip selection (supports single and multi-selection with mouse / Shift / Ctrl / box drag)
@@ -813,6 +655,8 @@ export default function App() {
     }
   };
 
+  const handleJoinSelected=()=>{try{const result=joinSelectedClips(clips,tracks,selectedClipIds.filter(id=>workspace!=='audio'||clips.find(c=>c.id===id)?.type==='audio'));setIsPlaying(false);setClips(result.clips);clipsRef.current=result.clips;pushHistory(result.clips);setSelectedClipIds(result.joinedIds);setSelectedClipId(result.joinedIds[0]);}catch(error){setTrackConstraintWarning((error as Error).message);}};
+
   const handleSelectMultipleClips = (clipIds: string[]) => {
     setSelectedClipIds(clipIds);
     setSelectedClipId(clipIds.length > 0 ? clipIds[clipIds.length - 1] : null);
@@ -831,6 +675,7 @@ export default function App() {
     if (idsToDelete.length === 0) return;
 
     const idsSet = new Set(idsToDelete);
+    for (const c of clips) if (idsSet.has(c.id) && c.isLinked && c.linkedClipId) idsSet.add(c.linkedClipId);
     const deletedClips = clips.filter(c => idsSet.has(c.id));
     const newClips = clips.filter(c => !idsSet.has(c.id));
     setClips(newClips);
@@ -921,32 +766,21 @@ export default function App() {
   };
 
   // Copy Clip
-  const handleCopyClip = () => {
-    const target = clips.find(c => c.id === selectedClipId);
-    if (target) {
-      setClipboardClip(target);
-    }
-  };
-
-  // Paste Clip
-  const handlePasteClip = () => {
-    if (!clipboardClip) return;
-    const newClip: TimelineClip = {
-      ...clipboardClip,
-      id: `clip_${Date.now()}`,
-      name: `${clipboardClip.name} (Copia)`,
-      startTime: Math.round(currentTime * 10) / 10,
-    };
-    const updated = [...clips, newClip];
-    setClips(updated);
-    pushHistory(updated);
-    setSelectedClipId(newClip.id);
-  };
+  const handleCopyClip = () => { const source = sourcePair(selectedClipId); if (source.length) setClipboardClip(source); };
+  const handlePasteClip = () => { if (clipboardClip) cloneAt(clipboardClip, currentTime); };
 
   // Update specific clip properties
   const handleUpdateClip = (clipId: string, updates: Partial<TimelineClip>) => {
     setClips(prev => {
-      const next = prev.map(c => (c.id === clipId ? { ...c, ...updates } : c));
+      const target = prev.find(c => c.id === clipId);
+      if (target && updates.duration !== undefined && ['video','audio'].includes(target.type)) {
+        const asset=mediaAssets.find(a=>a.id===target.assetId);
+        if(asset)updates={...updates,duration:Math.max(.04,Math.min(updates.duration,(asset.durationSec-(updates.offset ?? target.offset ?? 0))/clipRate(target)))};
+      }
+      if(updates.text!==undefined&&target?.captionWords){const words=updates.text.trim().split(/\s+/);updates={...updates,captionWords:words.length===target.captionWords.length?target.captionWords.map((w,i)=>({...w,text:words[i]})):undefined,captionStyle:words.length===target.captionWords.length?target.captionStyle:'classic'};}
+      const linkedUpdates = Object.fromEntries(Object.entries(updates).filter(([key]) => ['startTime', 'duration', 'offset'].includes(key)));
+      const next = prev.map(c => c.id === clipId ? { ...c, ...updates } : target?.isLinked && target.linkedClipId === c.id ? { ...c, ...linkedUpdates, ...(updates.offset!==undefined?{offset:Math.max(0,Math.round(((c.offset||0)+updates.offset-(target.offset||0))*1e6)/1e6)}:{}) } : c);
+      clipsRef.current = next;
       return next;
     });
   };
@@ -959,138 +793,25 @@ export default function App() {
 
   // Toggle Solo / Mute on Tracks
   const handleToggleTrackSolo = (trackId: string) => {
-    setTracks(prev =>
-      prev.map(t => (t.id === trackId ? { ...t, isSolo: !t.isSolo } : t))
-    );
+    const next=tracks.map(t=>t.id===trackId?{...t,isSolo:!t.isSolo}:t);
+    setTracks(next);tracksRef.current=next;pushHistory(clips,next);
   };
-
   const handleToggleTrackMute = (trackId: string) => {
-    setTracks(prev =>
-      prev.map(t => (t.id === trackId ? { ...t, isMuted: !t.isMuted } : t))
-    );
+    const next=tracks.map(t=>t.id===trackId?{...t,isMuted:!t.isMuted}:t);
+    setTracks(next);tracksRef.current=next;pushHistory(clips,next);
   };
 
   // Add media asset from stage library into timeline at exact vertical playhead position (doppio click)
   const handleAddMediaToTimeline = (asset: MediaAsset) => {
-    const playheadTime = Math.max(0, Math.round(currentTime * 10) / 10);
-    const duration = asset.durationSec || 12;
-
-    if (asset.type === 'video') {
-      // 2) I video vanno nella timeline video (blu) ed il relativo audio nella traccia audio (verde) agganciati insieme
-      const videoTrack = tracks.find(t => t.type === 'video') || tracks[1];
-      const audioTrack = tracks.find(t => t.type === 'audio') || tracks[3];
-
-      const now = Date.now();
-      const videoClipId = `clip_v_${now}`;
-      const audioClipId = `clip_a_${now}`;
-
-      const videoClip: TimelineClip = {
-        id: videoClipId,
-        name: asset.name,
-        trackId: videoTrack.id,
-        type: 'video',
-        startTime: playheadTime, // Esattamente nel punto della barra verticale del play (playhead)!
-        duration,
-        offset: 0,
-        color: '#2563eb',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        linkedClipId: audioClipId,
-        isLinked: true,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-        mediaThumbnail: asset.thumbnailUrl,
-      };
-
-      const audioClip: TimelineClip = {
-        id: audioClipId,
-        name: `${asset.name} [Audio]`,
-        trackId: audioTrack ? audioTrack.id : 'track_audio_1',
-        type: 'audio',
-        startTime: playheadTime,
-        duration,
-        offset: 0,
-        color: '#10b981',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        linkedClipId: videoClipId,
-        isLinked: true,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-      };
-
-      const nextClips = [...clips, videoClip, audioClip];
-      setClips(nextClips);
-      pushHistory(nextClips);
-      setSelectedClipId(videoClipId);
-
-      const sysMsg: ClaudePromptMessage = {
-        id: `sys_${Date.now()}`,
-        role: 'system',
-        content: `Video "${asset.name}" posizionato al playhead (${playheadTime}s) su traccia Video (blu) e relativo audio su traccia Audio (verde) agganciati insieme.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'success',
-      };
-      setClaudeMessages(prev => [...prev, sysMsg]);
-      return;
+    const type = asset.type;
+    let availableTracks = tracks;
+    let track = tracks.find(t => t.type === type);
+    if (!track) {
+      track = { ...INITIAL_TRACKS.find(t => t.type === type)!, id: crypto.randomUUID() };
+      availableTracks = [...availableTracks, track];
     }
-
-    if (asset.type === 'audio') {
-      // 3) Gli audio possono essere inseriti solo nella timeline degli audio
-      const audioTrack = tracks.find(t => t.type === 'audio') || tracks[3];
-      const newClip: TimelineClip = {
-        id: `clip_${Date.now()}`,
-        name: asset.name,
-        trackId: audioTrack.id,
-        type: 'audio',
-        startTime: playheadTime,
-        duration,
-        offset: 0,
-        color: '#10b981',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-      };
-      const nextClips = [...clips, newClip];
-      setClips(nextClips);
-      pushHistory(nextClips);
-      setSelectedClipId(newClip.id);
-      return;
-    }
-
-    if (asset.type === 'image') {
-      // 4) Le immagini possono essere inserite solo nella timeline degli audio e non nelle altre
-      const audioTrack = tracks.find(t => t.type === 'audio') || tracks[3];
-      const newClip: TimelineClip = {
-        id: `clip_${Date.now()}`,
-        name: asset.name,
-        trackId: audioTrack.id,
-        type: 'image',
-        startTime: playheadTime,
-        duration,
-        offset: 0,
-        color: '#eab308',
-        transparency: 100,
-        volumeDb: 0,
-        fadeIn: 0,
-        fadeOut: 0,
-        assetId: asset.id,
-        mediaUrl: asset.fileUrl,
-        mediaThumbnail: asset.thumbnailUrl,
-      };
-      const nextClips = [...clips, newClip];
-      setClips(nextClips);
-      pushHistory(nextClips);
-      setSelectedClipId(newClip.id);
-      return;
-    }
+    if (asset.type === 'video' && !availableTracks.some(t => t.type === 'audio')) availableTracks = [...availableTracks, { ...INITIAL_TRACKS.find(t => t.type === 'audio')!, id: crypto.randomUUID() }];
+    addAsset(asset, track.id, currentTime, availableTracks);
   };
 
   // Add new track dynamically
@@ -1100,7 +821,7 @@ export default function App() {
     const isAudio = type === 'audio';
     const isImage = type === 'image';
 
-    const headerBg = isEffects
+    const headerBg = type==='text' ? '#63300d' : isEffects
       ? '#35121b'
       : isVideo
       ? '#0f2942'
@@ -1108,7 +829,7 @@ export default function App() {
       ? '#0d3324'
       : '#382a08';
 
-    const laneBg = isEffects
+    const laneBg = type==='text' ? '#301909' : isEffects
       ? '#1e141a'
       : isVideo
       ? '#111d2e'
@@ -1117,7 +838,7 @@ export default function App() {
       : '#1a1608';
 
     const newTrack: Track = {
-      id: `track_${type}_${Date.now()}`,
+      id: crypto.randomUUID(),
       name,
       type,
       isSolo: false,
@@ -1126,7 +847,7 @@ export default function App() {
       laneBg,
     };
 
-    setTracks(prev => [...prev, newTrack]);
+    const next=[...tracks,newTrack];setTracks(next);tracksRef.current=next;pushHistory(clips,next);
   };
 
   // Markers Handlers
@@ -1151,65 +872,49 @@ export default function App() {
   };
 
   // Generate captions
-  const handleGenerateCaptions = () => {
-    if (deleteCurrentCaptions) {
-      setSubtitles([]);
-    }
-    const newItems: SubtitleItem[] = [
-      {
-        id: `sub_${Date.now()}_1`,
-        startTime: 7.0,
-        endTime: 12.0,
-        text: spokenLanguage === 'Italian'
-          ? "Benvenuti in TALEDIT: il montaggio video intelligente via MCP."
-          : "Welcome to TALEDIT: intelligent video editing via MCP.",
-        translation: spokenLanguage === 'Italian' ? "Welcome to TALEDIT: video editing via MCP." : undefined,
-      },
-      {
-        id: `sub_${Date.now()}_2`,
-        startTime: 12.5,
-        endTime: 18.0,
-        text: spokenLanguage === 'Italian'
-          ? "Ogni traccia ha il suo colore dedicato e maniglie interattive per trasparenza, volume e dissolvenze."
-          : "Each track has its dedicated color and interactive handles for transparency, volume, and fades.",
-        translation: spokenLanguage === 'Italian' ? "Each track has dedicated color and interactive handles." : undefined,
-      },
-      {
-        id: `sub_${Date.now()}_3`,
-        startTime: 18.5,
-        endTime: 24.0,
-        text: spokenLanguage === 'Italian'
-          ? "Puoi scrivere prompt sia da Claude DT che da TALEDIT per modificare tutto in tempo reale."
-          : "You can write prompts from both Claude DT and TALEDIT to modify everything in real time.",
-        translation: spokenLanguage === 'Italian' ? "Write prompts from Claude DT or TALEDIT in real time." : undefined,
-      },
-    ];
-
-    setSubtitles(newItems);
+  const handleGenerateCaptions = async () => {
+    try {
+      const durationSec = Math.max(0, ...clips.map(c => c.startTime + c.duration));
+      const response = await fetch('/api/captions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clips, tracks, durationSec, audioMaster, language: spokenLanguage, bilingual: bilingualCaptions }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error);
+      for (;;) {
+        const statusResponse = await fetch(`/api/captions/${data.jobId}`);
+        const job = await statusResponse.json();
+        if (!statusResponse.ok || job.status === 'error') throw new Error(job.error || 'Trascrizione fallita.');
+        if (job.status === 'complete') {
+          setSubtitles(prev => deleteCurrentCaptions ? job.subtitles : [...prev, ...job.subtitles]);
+          if (!job.subtitles.length) setTrackConstraintWarning('Whisper non ha rilevato parlato nella timeline.');
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (error) { setTrackConstraintWarning((error as Error).message); }
   };
 
   const handleUpdateSubtitle = (id: string, text: string) => {
-    setSubtitles(prev => prev.map(s => (s.id === id ? { ...s, text } : s)));
+    setSubtitles(prev => prev.map(s => {if(s.id!==id)return s;const tokens=text.trim().split(/\s+/),words=s.words&&tokens.length===s.words.length?s.words.map((w,i)=>({...w,text:tokens[i]})):undefined;return {...s,text,words};}));
   };
 
   const handleDeleteSubtitle = (id: string) => {
     setSubtitles(prev => prev.filter(s => s.id !== id));
   };
 
-  // Microphone toggle (simulated voice prompting)
   const handleToggleMic = () => {
-    const nextState = !isMicActive;
-    setIsMicActive(nextState);
-    if (nextState) {
-      setIsClaudeDialogOpen(true);
-      handleSendPrompt("Taglia al tempo corrente e alza volume di +2 dB");
-    }
+    if (recognitionRef.current) { recognitionRef.current.stop(); setIsMicActive(false); return; }
+    const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!Recognition) { setTrackConstraintWarning('Riconoscimento vocale non disponibile in questo browser. Usa la console comandi.'); return; }
+    const recognition = new Recognition(); recognitionRef.current=recognition; recognition.lang = 'it-IT';
+    recognition.onresult = (event: any) => handleSendPrompt(event.results[0][0].transcript);
+    recognition.onend = () => { recognitionRef.current=null; setIsMicActive(false); };
+    recognition.onerror = () => { recognitionRef.current=null; setIsMicActive(false); setTrackConstraintWarning('Microfono non disponibile o accesso negato.'); };
+    recognition.start(); setIsMicActive(true);
   };
 
   const selectedClip = clips.find(c => c.id === selectedClipId) || null;
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#090d16] text-[#e2e8f0] font-sans antialiased select-none">
+      {mediaImportProgress && <p role="status" className="fixed top-16 right-4 z-[100] rounded bg-slate-800 p-3 text-sm text-cyan-200">{mediaImportProgress}</p>}
       {/* Hidden file input for opening .tal projects */}
       <input
         ref={talFileInputRef}
@@ -1223,7 +928,6 @@ export default function App() {
       <input
         ref={mediaFileInputRef}
         type="file"
-        accept=".mp4,.mov,.avi,.mp3,.wav,.png,.jpg,.jpeg,video/mp4,video/quicktime,video/x-msvideo,audio/mpeg,audio/wav,image/png,image/jpeg"
         multiple
         onChange={handleMediaFileImport}
         className="hidden"
@@ -1231,11 +935,18 @@ export default function App() {
 
       {/* 1. Top Navigation Bar */}
       <TopNav
+        canScreenshot={!screenshotBusy && activeTimelineClips(clips,tracks).some(c=>c.type==='video' && currentTime>=c.startTime && currentTime<c.startTime+c.duration)}
+        onScreenshot={async()=>{setIsPlaying(false);setScreenshotBusy(true);try{const response=await fetch('/api/screenshot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clips,tracks,subtitles:timelineSubtitles(activeTimelineClips(clips,tracks)),durationSec:Math.max(.04,...clips.map(c=>c.startTime+c.duration)),frameTime:currentTime,resolution:'1080p',aspectRatio})});const result=await response.json();if(!response.ok)throw new Error(result.error || 'Screenshot non riuscito.');await downloadScreenshot(result);setToastMessage(result.savedToDownloads?`Screenshot salvato in Download: ${result.fileName}`:'Screenshot PNG scaricato.');setTimeout(()=>setToastMessage(null),4000);}catch(error){setTrackConstraintWarning((error as Error).message);}finally{setScreenshotBusy(false);}}}
+        hasSelection={clips.some(c=>c.id===selectedClipId || selectedClipIds.includes(c.id))}
+        canUndo={historyCount>0}
+        canRedo={historyIndexRef.current<historyRef.current.length-1}
+        canPaste={Boolean(clipboardClip?.length)}
         claudeConnected={claudeConnected}
         onToggleClaude={handleToggleClaude}
-        onOpenClaudeDialog={handleOpenClaudeDialog}
+        onOpenClaudeDialog={() => { setMcpProvider('claude'); handleOpenClaudeDialog(); }}
+        onOpenChatGPT={() => { setMcpProvider('chatgpt'); setIsClaudeDialogOpen(true); }}
         onCut={handleCutClip}
-        onDelete={handleDeleteClip}
+        onDelete={() => handleDeleteClip()}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onCopy={handleCopyClip}
@@ -1243,17 +954,31 @@ export default function App() {
         onOpenProject={() => talFileInputRef.current?.click()}
         onImport={() => mediaFileInputRef.current?.click()}
         onSave={handleSaveTalProject}
-        onExport={() => setIsExportModalOpen(true)}
+        onExport={() => { setIsPlaying(false); setIsExportModalOpen(true); }}
         onAddMarker={() => handleAddMarker(currentTime)}
         markerCount={markers.length}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={tab => {if(tab==='Pen Mask'){setWorkspace('video');setIsPlaying(false);const target=selectedClip&&['video','image'].includes(selectedClip.type)?selectedClip:clips.filter(c=>['video','image'].includes(c.type)&&currentTime>=c.startTime&&currentTime<c.startTime+c.duration).at(-1);if(target){setSelectedClipId(target.id);setSelectedClipIds([target.id]);if(currentTime<target.startTime||currentTime>=target.startTime+target.duration)setCurrentTime(target.startTime);}}setActiveTab(prev=>prev===tab?'':tab);}}
+        onFullscreen={() => { const action = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(); action.catch(() => setTrackConstraintWarning('Schermo intero non disponibile in questa finestra.')); }}
         isMicActive={isMicActive}
         onToggleMic={handleToggleMic}
       />
 
+      <FullscreenTools><BGRemoverPanel open={activeTab==='BG Remover'} selected={selectedClip} onClose={()=>setActiveTab('')} onComplete={(asset,original)=>{
+        setMediaAssets(prev=>[...prev,asset]);
+        const next=clipsRef.current.map(c=>c.id===original.id && c.mediaUrl===original.mediaUrl && c.offset===original.offset && c.duration===original.duration?{...c,assetId:asset.id,mediaUrl:asset.fileUrl,mediaThumbnail:asset.thumbnailUrl,offset:0,name:asset.name}:c);
+        if(next.some((c,i)=>c!==clipsRef.current[i])){setClips(next);clipsRef.current=next;pushHistory(next);}
+      }}/>
+      {activeTab==='AI Cut'&&<SmartCutPanel clips={clips} tracks={tracks} master={audioMaster} language={spokenLanguage} onClose={()=>setActiveTab('')} onApply={(ranges,warning)=>{try{const result=rippleRemove(clips,ranges),nextMarkers=markers.map(m=>({...m,time:result.mapTime(m.time)}));pushHistory(clips);setIsPlaying(false);setClips(result.clips);clipsRef.current=result.clips;pushHistory(result.clips,tracks,audioMaster,{markers:nextMarkers,subtitles:[]});setCurrentTime(result.mapTime(currentTime));setMarkers(nextMarkers);setSubtitles([]);setSelectedClipId(null);setSelectedClipIds([]);setActiveTab('');setToastMessage(`AI Cut: ${(Math.max(...clips.map(c=>c.startTime+c.duration))-result.duration).toFixed(2)} s eliminate automaticamente.${warning?' '+warning:''}`);setTimeout(()=>setToastMessage(null),6000);}catch(e){setTrackConstraintWarning((e as Error).message);}}}/>}
+      {activeTab && !['BG Remover','AI Cut','Pen Mask'].includes(activeTab) && <EditingToolsPanel tab={activeTab} selected={selectedClip} onClose={() => setActiveTab('')}
+        onUpdate={updates => { if (!selectedClipId) return; const next=clips.map(c=>c.id===selectedClipId?{...c,...updates}:c);setClips(next);clipsRef.current=next;pushHistory(next); }}
+        onAddEffect={type=>handleAddEffect(type)}
+        onCrossDissolve={duration => { try { const next=applyCrossDissolve(clips,selectedClipId || '',duration);setClips(next);clipsRef.current=next;pushHistory(next); } catch(error) {setTrackConstraintWarning((error as Error).message);} }}>
+        <CaptionsPanel animated={animatedCaptions} onAnimatedChange={setAnimatedCaptions} hasGeneratedCaptions={clips.some(c=>Boolean(c.captionId))} spokenLanguage={spokenLanguage} setSpokenLanguage={setSpokenLanguage} bilingualCaptions={bilingualCaptions} setBilingualCaptions={setBilingualCaptions} deleteCurrentCaptions={deleteCurrentCaptions} setDeleteCurrentCaptions={setDeleteCurrentCaptions} subtitles={subtitles} onGenerateCaptions={handleGenerateCaptions} onInsertCaptions={()=>{try{const next=captionClips(subtitles,clips,tracks,deleteCurrentCaptions,bilingualCaptions,animatedCaptions);setClips(next.clips);clipsRef.current=next.clips;setTracks(next.tracks);tracksRef.current=next.tracks;pushHistory(next.clips,next.tracks);}catch(error){setTrackConstraintWarning((error as Error).message);}}} onUpdateSubtitle={handleUpdateSubtitle} onDeleteSubtitle={handleDeleteSubtitle}/>
+      </EditingToolsPanel>}</FullscreenTools>
+
       {/* 2. Main Middle Workspace: Header + 4 Resizable Panels */}
-      <div className="flex-1 flex flex-col min-h-0 bg-[#0e121d]">
+      <div style={{display:workspace==='video'?'flex':'none'}} className="flex-1 flex flex-col min-h-0 bg-[#0e121d]">
         {/* Subheader matching screenshot: "PREVIEW / Importa un file multimediale per iniziare" */}
         <div className="px-4 py-1.5 border-b border-[#1b2436] bg-[#0c101a] flex items-center justify-between">
           <div className="flex items-baseline gap-3">
@@ -1273,7 +998,7 @@ export default function App() {
         </div>
 
         {/* 4 Panels Grid with draggable borders (User request #1) */}
-        <div className="flex-1 flex min-h-0 overflow-hidden">
+        <div style={{display:workspace==='video'?'flex':'none'}} className="flex-1 flex min-h-0 overflow-hidden">
           {/* Panel 1: Media Library */}
           <div style={{ width: `${mediaWidth}px` }} className="h-full shrink-0">
             <MediaLibraryPanel
@@ -1299,34 +1024,6 @@ export default function App() {
             <div className="w-0.5 h-8 bg-gray-600 group-hover:bg-black rounded" />
           </div>
 
-          {/* Panel 2: Spoken Language / Captions */}
-          <div style={{ width: `${captionsWidth}px` }} className="h-full shrink-0">
-            <CaptionsPanel
-              spokenLanguage={spokenLanguage}
-              setSpokenLanguage={setSpokenLanguage}
-              bilingualCaptions={bilingualCaptions}
-              setBilingualCaptions={setBilingualCaptions}
-              deleteCurrentCaptions={deleteCurrentCaptions}
-              setDeleteCurrentCaptions={setDeleteCurrentCaptions}
-              subtitles={subtitles}
-              onGenerateCaptions={handleGenerateCaptions}
-              onUpdateSubtitle={handleUpdateSubtitle}
-              onDeleteSubtitle={handleDeleteSubtitle}
-            />
-          </div>
-
-          {/* Draggable Divider 2 (Captions / Player) */}
-          <div
-            onMouseDown={e => {
-              e.preventDefault();
-              setResizingDivider({ type: 'captions', startX: e.clientX, startY: e.clientY, startDim: captionsWidth });
-            }}
-            className="w-1.5 hover:w-2 bg-[#172133] hover:bg-cyan-500 cursor-col-resize transition-all z-20 flex items-center justify-center group shrink-0 select-none"
-            title="Trascina per allargare o stringere la sezione"
-          >
-            <div className="w-0.5 h-8 bg-gray-600 group-hover:bg-black rounded" />
-          </div>
-
           {/* Panel 3: Video Player */}
           <div className="flex-1 h-full min-w-[280px]">
             <PlayerPanel
@@ -1337,8 +1034,10 @@ export default function App() {
               onSeek={t => setCurrentTime(t)}
               aspectRatio={aspectRatio}
               setAspectRatio={setAspectRatio}
-              clips={clips}
-              subtitles={subtitles}
+              penActive={activeTab==='Pen Mask'} selectedClip={selectedClip} onUpdateMask={mask=>{if(selectedClip){setIsPlaying(false);const next=clips.map(c=>c.id===selectedClip.id?{...c,mask}:c);setClips(next);clipsRef.current=next;pushHistory(next);}}}
+              tracks={tracks} audioMaster={audioMaster}
+              clips={activeTimelineClips(clips, tracks)}
+              subtitles={timelineSubtitles(activeTimelineClips(clips,tracks))}
               isMuted={isMutedMaster}
               onToggleMute={() => setIsMutedMaster(m => !m)}
             />
@@ -1367,6 +1066,16 @@ export default function App() {
         </div>
       </div>
 
+      {workspace==='audio' && <div className="flex flex-1 min-h-0">
+        <div style={{width:mediaWidth}} className="shrink-0 min-h-0"><MediaLibraryPanel assets={mediaAssets.filter(a=>a.type==='audio')} onDeleteAsset={handleDeleteStageAsset} onAddAsset={asset=>setMediaAssets(prev=>[asset,...prev])} onAddMediaToTimeline={handleAddMediaToTimeline} onCustomFileImported={()=>{}}/></div>
+        <AudioMixer tracks={tracks.filter(t=>t.type==='audio')} master={audioMaster} playing={isPlaying} muted={isMutedMaster||!!audioMaster.mute} currentTime={currentTime} duration={totalDuration}
+          onPlay={()=>setIsPlaying(p=>!p)} onMuteMaster={()=>{const next={...audioMaster,mute:!(isMutedMaster||audioMaster.mute)};setIsMutedMaster(false);setAudioMaster(next);pushHistory(clips,tracks,next);}} onSeek={setCurrentTime}
+          onUpdate={(id,audio)=>{if(id==='master'){setAudioMaster(audio);pushHistory(clips,tracks,audio);return;}const next=tracks.map(t=>t.id===id?{...t,audio}:t);setTracks(next);tracksRef.current=next;pushHistory(clips,next);}}
+          onSolo={handleToggleTrackSolo} onMute={handleToggleTrackMute} onAdd={()=>handleAddTrack('audio',`AUDIO ${tracks.filter(t=>t.type==='audio').length+1}`)}/>
+      </div>}
+
+      {workspace==='color' && <ColorPanel clips={activeTimelineClips(clips,tracks)} selectedId={selectedClipId} currentTime={currentTime} duration={totalDuration} playing={isPlaying} aspectRatio={aspectRatio} onSelect={id=>{setSelectedClipId(id);setSelectedClipIds([id]);}} onSeek={setCurrentTime} onPlay={()=>setIsPlaying(p=>!p)} onUpdate={(id,colorGrade)=>{const next=clips.map(c=>c.id===id?{...c,colorGrade}:c);setClips(next);clipsRef.current=next;pushHistory(next);}}/>}
+
       {/* Draggable Divider 4 (Workspace / Timeline) */}
       <div
         onMouseDown={e => {
@@ -1382,12 +1091,14 @@ export default function App() {
       {/* 3. Bottom Timeline Section */}
       <div style={{ height: `${timelineHeight}px` }} className="w-full shrink-0">
         <Timeline
-          tracks={tracks}
-          clips={clips}
+          audioOnly={workspace==='audio'}
+          tracks={workspace==='audio'?tracks.filter(t=>t.type==='audio'):tracks}
+          clips={workspace==='audio'?clips.filter(c=>c.type==='audio'):clips}
           currentTime={currentTime}
           totalDuration={totalDuration}
           selectedClipId={selectedClipId}
           selectedClipIds={selectedClipIds}
+          onJoinSelected={handleJoinSelected}
           zoom={zoom}
           setZoom={setZoom}
           onSeek={t => setCurrentTime(t)}
@@ -1396,8 +1107,11 @@ export default function App() {
           onUpdateClip={handleUpdateClip}
           onToggleTrackSolo={handleToggleTrackSolo}
           onToggleTrackMute={handleToggleTrackMute}
+          onResizeTrack={(id,height)=>{const next=tracks.map(t=>t.id===id?{...t,height}:t);setTracks(next);tracksRef.current=next;}}
           onDeleteTrack={handleDeleteTrack}
-          onAddTrack={handleAddTrack}
+          onAddTrack={(type,name)=>handleAddTrack(workspace==='audio'?'audio':type,name)}
+          onDuplicateTrack={id=>{try{const next=duplicateTrack(tracks,clips,id);setTracks(next.tracks);tracksRef.current=next.tracks;setClips(next.clips);clipsRef.current=next.clips;pushHistory(next.clips,next.tracks);}catch(error){setTrackConstraintWarning((error as Error).message);}}}
+          onChangeSpeed={(id,level)=>{try{const old=clips.find(c=>c.id===id);if(!old)return;const next=changeClipSpeed(clips,id,level);setIsPlaying(false);setClips(next);clipsRef.current=next;pushHistory(next);if(currentTime>=old.startTime && currentTime<old.startTime+old.duration)setCurrentTime(old.startTime+(currentTime-old.startTime)*clipRate(old)/clipRate({speedLevel:level}));}catch(error){setTrackConstraintWarning((error as Error).message);}}}
           markers={markers}
           onAddMarker={handleAddMarker}
           onUpdateMarker={handleUpdateMarker}
@@ -1409,8 +1123,15 @@ export default function App() {
         />
       </div>
 
+      <nav className="workspace-tabs" role="tablist" aria-label="Sezione di lavoro">
+        <button role="tab" aria-selected={workspace==='video'} className="video-tab" onClick={()=>{setWorkspace('video');setSelectedClipId(null);setSelectedClipIds([]);}}>VIDEO</button>
+        <button role="tab" aria-selected={workspace==='audio'} className="audio-tab" onClick={()=>{setWorkspace('audio');setSelectedClipId(null);setSelectedClipIds([]);}}>AUDIO</button>
+        <button role="tab" aria-selected={workspace==='color'} className="color-tab" onClick={()=>{setWorkspace('color');setSelectedClipId(null);setSelectedClipIds([]);}}>COLOR</button>
+      </nav>
+
       {/* 4. Claude DT MCP Dialog Window */}
       <ClaudeMCPDialog
+        provider={mcpProvider}
         isOpen={isClaudeDialogOpen}
         onClose={() => setIsClaudeDialogOpen(false)}
         claudeConnected={claudeConnected}
@@ -1422,17 +1143,20 @@ export default function App() {
 
       {/* 5. Export / Save Modal */}
       <ExportModal
+        audioMaster={audioMaster}
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         clips={clips}
         tracks={tracks}
-        subtitles={subtitles}
+        subtitles={timelineSubtitles(activeTimelineClips(clips,tracks))}
         aspectRatio={aspectRatio}
+        currentTime={currentTime}
       />
 
+      {toastMessage && <div role="status" onClick={()=>setToastMessage(null)} className="fixed bottom-12 left-1/2 -translate-x-1/2 max-w-[90vw] rounded-lg border border-cyan-700 bg-slate-900 px-4 py-2 text-xs text-cyan-100 shadow-xl z-50 cursor-pointer">{toastMessage}</div>}
       {/* Floating Track Constraint Warning Toast */}
       {trackConstraintWarning && (
-        <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-[#4c0519] border-2 border-rose-500 text-rose-100 px-5 py-2.5 rounded-lg shadow-2xl z-50 flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-2">
+        <div role="alert" onClick={() => setTrackConstraintWarning(null)} className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-[#4c0519] border-2 border-rose-500 text-rose-100 px-5 py-2.5 rounded-lg shadow-2xl z-50 flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-2">
           <span className="text-base">⛔</span>
           <span>{trackConstraintWarning}</span>
         </div>

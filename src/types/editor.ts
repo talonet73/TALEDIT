@@ -1,4 +1,6 @@
-export type TrackType = 'effect' | 'video' | 'audio' | 'image';
+import type { VisualEffect, Adjustments } from '../services/visualSettings';
+export interface TimedWord {text:string;startTime:number;endTime:number;probability?:number}
+export type TrackType = 'effect' | 'video' | 'audio' | 'image' | 'text';
 
 export interface TimelineMarker {
   id: string;
@@ -9,6 +11,10 @@ export interface TimelineMarker {
 }
 
 export interface TimelineClip {
+  fadeEnvelopes?:{offset:number;rate:number;duration:number;fadeIn:number;fadeOut:number}[];
+  segments?:TimelineClip[];
+  rateMultiplier?:number;
+  suppressEmbeddedAudio?:boolean;
   id: string;
   name: string;
   trackId: string;
@@ -22,7 +28,20 @@ export interface TimelineClip {
   volumeDb: number; // -60 to +12 dB for audio
   fadeIn: number; // in seconds for effects
   fadeOut: number; // in seconds for effects
-  effectType?: 'camera_shake' | 'glow' | 'blur' | 'glitch' | 'vintage' | 'cinematic' | 'dissolvenza';
+  effectType?: 'camera_shake' | 'glow' | 'blur' | 'glitch' | 'vintage' | 'cinematic' | 'dissolvenza' | 'zoom_in' | 'zoom_out' | 'monochrome';
+  effects?: VisualEffect[];
+  intensity?: number; // effect controls: 0..10, default 5
+  speed?: number;
+  speedLevel?: number; // -5..+5 playback step; independent of effect animation speed
+  effectSpan?: number; // original animation duration, retained through cuts
+  animationOffset?: number; // internal still-frame animation clock
+  text?: string;
+  captionId?: string;
+  captionWords?:TimedWord[]; // source-relative within the original text clip
+  captionStyle?:'classic'|'karaoke';
+  mask?:import('../services/penMask').PenMask;
+  adjustments?: Adjustments;
+  colorGrade?: import('../services/colorGrade').ColorGrade;
   mediaUrl?: string;
   mediaThumbnail?: string;
   subtitles?: string;
@@ -39,6 +58,8 @@ export interface Track {
   isMuted: boolean;
   headerBg: string;
   laneBg: string;
+  audio?: import('../services/audioMixer').AudioSettings;
+  height?: number; // preferred row height before fitting the timeline viewport
 }
 
 export interface MediaAsset {
@@ -49,6 +70,10 @@ export interface MediaAsset {
   durationSec: number;
   thumbnailUrl?: string;
   fileUrl?: string;
+  hasAudio?: boolean;
+  width?: number;
+  audio?: import('../services/audioMixer').AudioSettings;
+  height?: number;
   isLost?: boolean;
   downloadProgress?: number; // 0 to 100 (%)
   isDownloading?: boolean;
@@ -56,6 +81,12 @@ export interface MediaAsset {
 }
 
 export interface SubtitleItem {
+  words?:TimedWord[];
+  style?:'classic'|'karaoke';
+  row?:number;
+  transparency?:number;
+  fadeIn?:number;
+  fadeOut?:number;
   id: string;
   startTime: number;
   endTime: number;

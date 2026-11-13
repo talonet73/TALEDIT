@@ -1,3 +1,12 @@
+import {maskAlpha} from './penMask';
+import {karaokeLayout} from './karaoke';
+import type {TimedWord} from '../types/editor';
+import {applyGrade,hasGrade} from './colorGrade';
+import {LiveAudioMixer} from './liveAudioMixer';
+import type {AudioSettings} from './audioMixer';
+import type {Track} from '../types/editor';
+import {clipRate,sourceTime} from './clipSpeed';
+import { adjustPixels, clipAlpha, colorSettings, motionAt, effectAmount, effectMix, type VisualSettings } from './visualSettings';
 /**
  * Real Media & Canvas Rendering Engine for TALEDIT
  * Supports playback of real imported HTML5 video, audio and images,
@@ -5,7 +14,8 @@
  * NO synthetic oscillator drone sound!
  */
 
-export interface VideoClipData {
+export interface VideoClipData extends Partial<VisualSettings> {
+  trackId?:string;
   id: string;
   name: string;
   transparency: number;
@@ -14,9 +24,13 @@ export interface VideoClipData {
   offset?: number;
   mediaUrl?: string;
   hasSeparateAudioClip?: boolean;
+  volumeDb?: number;
+  layer?: number;
 }
 
 export interface AudioClipData {
+  speedLevel?:number;rateMultiplier?:number;fadeEnvelopes?:import('../types/editor').TimelineClip['fadeEnvelopes'];
+  trackId?:string;
   id: string;
   name: string;
   volumeDb: number;
@@ -24,9 +38,11 @@ export interface AudioClipData {
   duration: number;
   offset?: number;
   mediaUrl?: string;
+  fadeIn?: number;
+  fadeOut?: number;
 }
 
-export interface EffectClipData {
+export interface EffectClipData extends Partial<VisualSettings> {
   id: string;
   name: string;
   fadeIn: number;
@@ -36,7 +52,8 @@ export interface EffectClipData {
   effectType?: string;
 }
 
-export interface ImageClipData {
+export interface ImageClipData extends Partial<VisualSettings> {
+  layer?: number;
   id: string;
   name: string;
   transparency: number;
@@ -46,465 +63,242 @@ export interface ImageClipData {
 }
 
 export interface SubtitleData {
+  words?:TimedWord[];style?:'classic'|'karaoke';
+  row?:number;transparency?:number;fadeIn?:number;fadeOut?:number;
   text: string;
   startTime: number;
   endTime: number;
 }
 
-class PlaybackEngine {
-  private videoCache: Map<string, HTMLVideoElement> = new Map();
-  private audioCache: Map<string, HTMLAudioElement> = new Map();
-  private imageCache: Map<string, HTMLImageElement> = new Map();
-  private onFrameReadyCallback: (() => void) | null = null;
-
-  public setOnFrameReady(callback: () => void) {
-    this.onFrameReadyCallback = callback;
+export class PlaybackEngine {
+  private frameCache = new Map<string, HTMLCanvasElement>();
+  private videoCache = new Map<string, HTMLVideoElement>();
+  private audioCache = new Map<string, HTMLAudioElement>();
+  private imageCache = new Map<string, HTMLImageElement>();
+  private audioContext: AudioContext | null = null;
+  private mixer:LiveAudioMixer|null=null;
+  private gainRoutes=new Map<HTMLMediaElement,AudioNode>();
+  public audioLevel(id:string){return this.mixer?.level(id) || {peak:0,rms:0};}
+  private gains = new Map<HTMLMediaElement, GainNode>();
+  private warming = new Map<string,string>();
+  private onFrameReady: (() => void) | null = null;
+  private notify = () => this.onFrameReady?.();
+  public setOnFrameReady(callback: (() => void) | null) { this.onFrameReady = callback; }
+  private mediaRevision=new Map<string,number>();
+  private desiredTime=new WeakMap<HTMLMediaElement,number>();
+  private previewUrl(url:string){if(!url.startsWith('/media_downloads/'))return url;return '/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length))+(this.mediaRevision.has(url)?`?v=${this.mediaRevision.get(url)}`:'');}
+  public diagnostics(url:string){const base='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));const collect=(cache:Map<string,HTMLMediaElement>)=>[...cache.entries()].filter(([,e])=>e.getAttribute('src')?.split('?')[0]===base).map(([id,e])=>({id,source:e.currentSrc,currentTime:e.currentTime,duration:e.duration,readyState:e.readyState,seeking:e.seeking,paused:e.paused,muted:e.muted,volume:e.volume,playbackRate:e.playbackRate,width:e instanceof HTMLVideoElement?e.videoWidth:undefined,height:e instanceof HTMLVideoElement?e.videoHeight:undefined,error:e.error?{code:e.error.code,message:e.error.message}:null}));return {video:collect(this.videoCache),audio:collect(this.audioCache),audioContext:this.audioContext?.state||'not_started',master:this.audioLevel('master')};}
+  public refreshMedia(url:string,force=false) {
+    const base='/api/media-preview/'+encodeURIComponent(url.slice('/media_downloads/'.length));
+    const affected=[...this.videoCache.values(),...this.audioCache.values()].filter(e=>e.getAttribute('src')?.split('?')[0]===base);
+    if(force||affected.some(e=>e.error)){this.mediaRevision.set(url,(this.mediaRevision.get(url)||0)+1);for(const element of affected){const position=this.desiredTime.get(element)??element.currentTime;element.addEventListener('loadedmetadata',()=>{if(Number.isFinite(position))element.currentTime=Math.max(0,Math.min(position,element.duration-.001));},{once:true});element.src=this.previewUrl(url);element.load();}}
+    this.notify();
   }
-
-  public getVideoElement(url: string): HTMLVideoElement {
-    if (!this.videoCache.has(url)) {
-      const v = document.createElement('video');
-      // Blob URLs should not have crossOrigin set as it can cause security/loading errors
-      if (!url.startsWith('blob:')) {
-        v.crossOrigin = 'anonymous';
-      }
-      v.playsInline = true;
-      v.preload = 'auto';
-      v.src = url;
-      v.muted = true; // Video element is muted by default; audio handled through dedicated audio sync
-      v.addEventListener('seeked', () => {
-        if (this.onFrameReadyCallback) this.onFrameReadyCallback();
-      });
-      v.addEventListener('loadeddata', () => {
-        if (this.onFrameReadyCallback) this.onFrameReadyCallback();
-      });
-      v.addEventListener('canplay', () => {
-        if (this.onFrameReadyCallback) this.onFrameReadyCallback();
-      });
-      v.addEventListener('timeupdate', () => {
-        if (this.onFrameReadyCallback) this.onFrameReadyCallback();
-      });
-      try {
-        v.load();
-      } catch (e) {
-        // ignore
-      }
-      this.videoCache.set(url, v);
+  public getVideoElement(url: string, key = url) {
+    url=this.previewUrl(url);
+    let element = this.videoCache.get(key);
+    if (element && element.getAttribute('src') !== url) { element.pause(); element.src = url; }
+    if (!element) {
+      element = document.createElement('video');
+      element.crossOrigin = 'anonymous'; element.playsInline = true; element.preload = 'auto'; element.muted = true;
+      for (const event of ['loadeddata','seeked','canplay','timeupdate','error']) element.addEventListener(event, this.notify);
+      element.src = url; this.videoCache.set(key, element);
     }
-    return this.videoCache.get(url)!;
+    return element;
   }
-
-  /**
-   * Preloads all video assets in clips to guarantee frames are immediately decodeable
-   */
-  public async preloadVideos(videoClips: VideoClipData[]): Promise<void> {
-    const promises = videoClips.map(c => {
-      if (!c.mediaUrl) return Promise.resolve();
-      const v = this.getVideoElement(c.mediaUrl);
-      if (v.readyState >= 2 && v.videoWidth > 0) return Promise.resolve();
-
-      return new Promise<void>(resolve => {
-        let isDone = false;
-        const onDone = () => {
-          if (isDone) return;
-          isDone = true;
-          v.removeEventListener('loadeddata', onDone);
-          v.removeEventListener('canplay', onDone);
-          v.removeEventListener('error', onDone);
-          resolve();
-        };
-        v.addEventListener('loadeddata', onDone);
-        v.addEventListener('canplay', onDone);
-        v.addEventListener('error', onDone);
-        try {
-          v.load();
-        } catch (e) {
-          resolve();
-        }
-        setTimeout(onDone, 1500); // 1.5s timeout safety
-      });
-    });
-
-    await Promise.all(promises);
+  public getAudioElement(url: string, key = url) {
+    url=this.previewUrl(url);
+    let element = this.audioCache.get(key);
+    if (element && element.getAttribute('src') !== url) { element.pause(); element.src = url; }
+    if (!element) { element = new Audio(); element.crossOrigin = 'anonymous'; element.preload = 'auto'; element.src = url;for(const event of ['loadeddata','canplay','error'])element.addEventListener(event,this.notify);this.audioCache.set(key, element); }
+    return element;
   }
-
-  public getAudioElement(url: string): HTMLAudioElement {
-    if (!this.audioCache.has(url)) {
-      const a = new Audio();
-      a.crossOrigin = 'anonymous';
-      a.preload = 'auto';
-      a.src = url;
-      this.audioCache.set(url, a);
-    }
-    return this.audioCache.get(url)!;
+  public getImageElement(url: string) {
+    let image = this.imageCache.get(url);
+    if (!image) { image = new Image(); image.crossOrigin = 'anonymous'; image.onload = this.notify; image.src = url; this.imageCache.set(url, image); }
+    return image;
   }
-
-  public getImageElement(url: string): HTMLImageElement {
-    if (!this.imageCache.has(url)) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = url;
-      img.onload = () => {
-        if (this.onFrameReadyCallback) this.onFrameReadyCallback();
-      };
-      this.imageCache.set(url, img);
-    }
-    return this.imageCache.get(url)!;
+  private warmMedia(time:number,videos:VideoClipData[],audios:AudioClipData[]){
+    const warm=(clips:(VideoClipData|AudioClipData)[],video:boolean)=>{
+      const upcoming=clips.filter(c=>c.mediaUrl&&c.startTime>time&&c.startTime<=time+1.5).sort((a,b)=>a.startTime-b.startTime).slice(0,3);
+      for(const c of upcoming){const key=(video?'v:':'a:')+c.id,signature=`${c.mediaUrl}:${c.offset||0}`;if(this.warming.get(key)===signature)continue;this.warming.set(key,signature);
+        const element=video?this.getVideoElement(c.mediaUrl!,c.id):this.getAudioElement(c.mediaUrl!,c.id);
+        const seek=()=>{if(this.warming.get(key)!==signature)return;if(element.readyState>=1&&Math.abs(element.currentTime-(c.offset||0))>.01)element.currentTime=c.offset||0;};
+        if(element.readyState>=1)seek();else element.addEventListener('loadedmetadata',seek,{once:true});
+      }
+      // A long automatic cut can create thousands of clips; retain a small decoder working set.
+      const cache=video?this.videoCache:this.audioCache;
+      if(cache.size>16){const keep=new Set(clips.filter(c=>time>=c.startTime-.01&&time<c.startTime+c.duration).map(c=>c.id));upcoming.forEach(c=>keep.add(c.id));for(const [id,el] of cache){if(keep.has(id))continue;el.pause();el.removeAttribute('src');el.load();this.gains.get(el)?.disconnect();this.gains.delete(el);this.gainRoutes.delete(el);cache.delete(id);this.frameCache.delete(id);this.warming.delete((video?'v:':'a:')+id);}}
+    };warm(videos,true);warm(audios,false);
   }
-
-  /**
-   * Sync active media playback with timeline state
-   */
-  public syncMedia(
-    currentTime: number,
-    isPlaying: boolean,
-    videoClips: VideoClipData[],
-    audioClips: AudioClipData[],
-    isMutedMaster: boolean
-  ) {
-    // 1. Sync Active Video
-    const activeVideo = videoClips.find(
-      v => currentTime >= v.startTime && currentTime <= v.startTime + v.duration
-    );
-
-    const activeVideoUrls = new Set<string>();
-    if (activeVideo && activeVideo.mediaUrl) {
-      activeVideoUrls.add(activeVideo.mediaUrl);
-      const vEl = this.getVideoElement(activeVideo.mediaUrl);
-      const targetTime = Math.max(0, (currentTime - activeVideo.startTime) + (activeVideo.offset || 0));
-
-      if (vEl.duration && targetTime >= vEl.duration) {
-        vEl.pause();
-      } else {
-        if (Math.abs(vEl.currentTime - targetTime) > 0.15) {
-          try {
-            vEl.currentTime = targetTime;
-          } catch (e) {
-            // ignore seek error
-          }
-        }
-
-        // If this video has NO separate audio clip on the timeline, play audio directly from video
-        if (!activeVideo.hasSeparateAudioClip) {
-          vEl.muted = isMutedMaster;
-        } else {
-          vEl.muted = true; // Audio is handled by the audio clip!
-        }
-
-        if (isPlaying) {
-          if (vEl.paused) {
-            vEl.play().catch(() => {});
-          }
-        } else {
-          if (!vEl.paused) {
-            vEl.pause();
-          }
-        }
-      }
+  private gain(element: HTMLMediaElement, db: number, muted: boolean, playing: boolean, amplitude = 1,trackId="") {
+    // Do not create an AudioContext until the user starts playback.
+    if (!playing) return;
+    if (!this.audioContext) this.audioContext = new AudioContext();
+    let gain = this.gains.get(element);
+    if (!gain) { gain = this.audioContext.createGain(); this.audioContext.createMediaElementSource(element).connect(gain); this.gains.set(element, gain); }
+    const destination=this.mixer?.input(trackId)||this.audioContext.destination;
+    if(this.gainRoutes.get(element)!==destination){gain.disconnect();gain.connect(destination);this.gainRoutes.set(element,destination);}
+    gain.gain.value = muted || db <= -60 ? 0 : Math.pow(10, db / 20) * amplitude;
+    if (this.audioContext.state === 'suspended') void this.audioContext.resume();
+  }
+  public syncMedia(time: number, playing: boolean, videos: VideoClipData[], audios: AudioClipData[], muted: boolean, tracks:Track[]=[], master?:AudioSettings) {
+    if(playing&&!this.audioContext)this.audioContext=new AudioContext();
+    if(this.audioContext){if(!this.mixer)this.mixer=new LiveAudioMixer(this.audioContext);this.mixer.configure(tracks,master,playing,muted);}
+    if(playing)this.warmMedia(time,videos,audios);
+    const videoIds = new Set<string>(), audioIds = new Set<string>();
+    const sync = (element: HTMLMediaElement, target: number,rate:number) => {
+      this.desiredTime.set(element,target);
+      element.playbackRate=rate;element.preservesPitch=true;
+      if (Number.isFinite(element.duration) && target >= element.duration) { element.pause(); return; }
+      if (!element.seeking && Math.abs(element.currentTime - target) > (playing ? .15 : .015)) element.currentTime = target;
+      if (playing && element.paused) void element.play().catch(() => {});
+      if (!playing && !element.paused) element.pause();
+    };
+    for (const clip of videos) if (clip.mediaUrl && time >= clip.startTime && time < clip.startTime + clip.duration) {
+      videoIds.add(clip.id); const element = this.getVideoElement(clip.mediaUrl, clip.id);
+      element.muted = muted || Boolean(clip.hasSeparateAudioClip);
+      if (!clip.hasSeparateAudioClip) this.gain(element, clip.volumeDb || 0, muted, playing, clipAlpha({...clip,transparency:100},time-clip.startTime),clip.trackId);
+      sync(element, Math.max(0, sourceTime(clip,time)),clipRate(clip));
     }
-
-    // Pause all other video elements
-    this.videoCache.forEach((vEl, url) => {
-      if (!activeVideoUrls.has(url)) {
-        if (!vEl.paused) vEl.pause();
-      }
-    });
-
-    // 2. Sync Active Audio Clips
-    const activeAudio = audioClips.find(
-      a => currentTime >= a.startTime && currentTime <= a.startTime + a.duration
-    );
-    const activeAudioUrls = new Set<string>();
-
-    if (activeAudio && activeAudio.mediaUrl) {
-      activeAudioUrls.add(activeAudio.mediaUrl);
-      const aEl = this.getAudioElement(activeAudio.mediaUrl);
-      const targetTime = Math.max(0, (currentTime - activeAudio.startTime) + (activeAudio.offset || 0));
-
-      // Calculate linear gain from dB: 0 dB = 1.0, -60 dB = 0
-      const linearGain = Math.max(0, Math.min(1, Math.pow(10, activeAudio.volumeDb / 20)));
-      aEl.volume = (isMutedMaster || activeAudio.volumeDb <= -55) ? 0 : linearGain;
-
-      if (aEl.duration && targetTime >= aEl.duration) {
-        aEl.pause();
-      } else {
-        if (Math.abs(aEl.currentTime - targetTime) > 0.15) {
-          try {
-            aEl.currentTime = targetTime;
-          } catch (e) {
-            // ignore
-          }
-        }
-
-        if (isPlaying) {
-          if (aEl.paused) {
-            aEl.play().catch(() => {});
-          }
-        } else {
-          if (!aEl.paused) {
-            aEl.pause();
-          }
-        }
-      }
+    for (const clip of audios) if (clip.mediaUrl && time >= clip.startTime && time < clip.startTime + clip.duration) {
+      audioIds.add(clip.id); const element = this.getAudioElement(clip.mediaUrl, clip.id);
+      element.muted = muted; this.gain(element, clip.volumeDb, muted, playing, clipAlpha({...clip,transparency:100},time-clip.startTime),clip.trackId);
+      sync(element, Math.max(0, sourceTime(clip,time)),clipRate(clip));
     }
-
-    // Pause all other audio elements
-    this.audioCache.forEach((aEl, url) => {
-      if (!activeAudioUrls.has(url)) {
-        if (!aEl.paused) aEl.pause();
-      }
+    for (const [key, element] of this.videoCache) if (!videoIds.has(key)) element.pause();
+    for (const [key, element] of this.audioCache) if (!audioIds.has(key)) element.pause();
+  }
+  private async waitFor(element: HTMLMediaElement, event: string, ready: () => boolean) {
+    if (ready()) return;
+    await new Promise<void>(resolve => {
+      // loadeddata may already have fired before a seek drops readyState. A new
+      // seek completes with seeked/canplay, without another loadeddata event.
+      const events=[...new Set([event,'loadeddata','canplay','seeked','error'])];
+      const done = () => {clearTimeout(timer);for(const name of events)element.removeEventListener(name,check);resolve();};
+      const check = () => {if(ready()||element.error)done();};
+      const timer = setTimeout(done, 10000);
+      for(const name of events)element.addEventListener(name,check);
+      check();
     });
   }
-
-  public pauseAll() {
-    this.videoCache.forEach(v => {
-      if (!v.paused) v.pause();
-    });
-    this.audioCache.forEach(a => {
-      if (!a.paused) a.pause();
-    });
+  public mediaError(clips:{id:string;name:string;type?:string;mediaUrl?:string}[]) {
+    for(const clip of clips){
+      const element=this.videoCache.get(clip.id)||this.audioCache.get(clip.id);
+      if(!element?.error)continue;
+      const reason=element.error.code===2?'Impossibile leggere il file dal server.':element.error.code===3?'Il browser non riesce a decodificare l’anteprima.':element.error.code===4?'Anteprima non supportata o non disponibile.':'Caricamento interrotto.';
+      return `${clip.name}: ${reason} (errore ${element.error.code})`;
+    }
+    return '';
   }
-
-  /**
-   * Prepares video element position and waits for seek before rendering.
-   * Crucial for offline/export rendering so that real video frames are decoded!
-   */
-  public async prepareAndRenderFrame(
-    canvas: HTMLCanvasElement,
-    timeSec: number,
-    videoClips: VideoClipData[],
-    effectClips: EffectClipData[],
-    imageClips: ImageClipData[],
-    subtitles: SubtitleData[]
-  ): Promise<void> {
-    const activeVideo = videoClips.find(v => timeSec >= v.startTime && timeSec <= v.startTime + v.duration);
-    if (activeVideo && activeVideo.mediaUrl) {
-      const vEl = this.getVideoElement(activeVideo.mediaUrl);
-      if (vEl.readyState === 0) {
-        try {
-          vEl.load();
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      const targetTime = Math.max(0, (timeSec - activeVideo.startTime) + (activeVideo.offset || 0));
-      const dur = vEl.duration && Number.isFinite(vEl.duration) ? vEl.duration : targetTime;
-      const clampedTarget = Math.min(dur, targetTime);
-
-      if (Math.abs(vEl.currentTime - clampedTarget) > 0.03) {
-        try {
-          vEl.currentTime = clampedTarget;
-          // Wait for seek to complete (with timeout safety)
-          await new Promise<void>(resolve => {
-            let resolved = false;
-            const onSeeked = () => {
-              if (resolved) return;
-              resolved = true;
-              vEl.removeEventListener('seeked', onSeeked);
-              resolve();
-            };
-            vEl.addEventListener('seeked', onSeeked, { once: true });
-            setTimeout(() => {
-              if (!resolved) {
-                resolved = true;
-                vEl.removeEventListener('seeked', onSeeked);
-                resolve();
-              }
-            }, 85);
-          });
-        } catch (e) {
-          // ignore
-        }
-      }
-    }
-
-    this.renderFrame(canvas, timeSec, videoClips, effectClips, imageClips, subtitles);
+  public async preloadVideos(videos: VideoClipData[]) {
+    await Promise.all(videos.filter(c => c.mediaUrl).map(c => { const element = this.getVideoElement(c.mediaUrl!, c.id); return this.waitFor(element, 'loadeddata', () => element.readyState >= 2 || Boolean(element.error)); }));
   }
-
-  /**
-   * Render composite frame onto canvas:
-   * Real video frame -> Real image -> Effects (shake, alpha, overlay) -> Subtitles
-   */
-  public renderFrame(
-    canvas: HTMLCanvasElement,
-    timeSec: number,
-    videoClips: VideoClipData[],
-    effectClips: EffectClipData[],
-    imageClips: ImageClipData[],
-    subtitles: SubtitleData[]
-  ) {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Clear background
-    ctx.fillStyle = '#0a0f1d';
-    ctx.fillRect(0, 0, width, height);
-
-    const activeVideo = videoClips.find(v => timeSec >= v.startTime && timeSec <= v.startTime + v.duration);
-    const activeImage = imageClips.find(img => timeSec >= img.startTime && timeSec <= img.startTime + img.duration);
-    const activeEffect = effectClips.find(e => timeSec >= e.startTime && timeSec <= e.startTime + e.duration);
-
-    let shakeX = 0;
-    let shakeY = 0;
-    let effectIntensity = 1;
-
-    if (activeEffect) {
-      const elapsed = timeSec - activeEffect.startTime;
-      const remaining = activeEffect.startTime + activeEffect.duration - timeSec;
-
-      if (activeEffect.fadeIn > 0 && elapsed < activeEffect.fadeIn) {
-        effectIntensity = elapsed / activeEffect.fadeIn;
-      } else if (activeEffect.fadeOut > 0 && remaining < activeEffect.fadeOut) {
-        effectIntensity = remaining / activeEffect.fadeOut;
-      } else {
-        effectIntensity = 1;
-      }
-
-      if (activeEffect.effectType === 'camera_shake') {
-        shakeX = Math.sin(timeSec * 35) * 8 * effectIntensity;
-        shakeY = Math.cos(timeSec * 28) * 6 * effectIntensity;
-      }
-    }
-
-    ctx.save();
-    ctx.translate(shakeX, shakeY);
-
-    if (activeVideo) {
-      const alpha = Math.max(0, Math.min(1, (activeVideo.transparency ?? 100) / 100));
-      ctx.globalAlpha = alpha;
-
-      let renderedRealVideo = false;
-
-      if (activeVideo.mediaUrl) {
-        const vEl = this.getVideoElement(activeVideo.mediaUrl);
-        if (vEl.videoWidth > 0 && (vEl.readyState >= 1 || vEl.currentTime >= 0)) {
-          // Draw real video with aspect ratio containment
-          const vw = vEl.videoWidth;
-          const vh = vEl.videoHeight;
-          const vAspect = vw / vh;
-          const cAspect = width / height;
-
-          let dw = width;
-          let dh = height;
-          let dx = 0;
-          let dy = 0;
-
-          if (vAspect > cAspect) {
-            dh = width / vAspect;
-            dy = (height - dh) / 2;
-          } else {
-            dw = height * vAspect;
-            dx = (width - dw) / 2;
-          }
-
-          try {
-            ctx.drawImage(vEl, dx, dy, dw, dh);
-            renderedRealVideo = true;
-          } catch (err) {
-            // ignore drawImage exception
+  public async prepareAndRenderFrame(canvas: HTMLCanvasElement, time: number, videos: VideoClipData[], effects: EffectClipData[], images: ImageClipData[], subtitles: SubtitleData[], shouldRender=()=>true) {
+    const active = videos.filter(v => time >= v.startTime && time < v.startTime + v.duration);
+    await this.preloadVideos(active);
+    if(!shouldRender())return;
+    await Promise.all(active.filter(c => c.mediaUrl).map(async c => {
+      if(!shouldRender())return;
+      const element = this.getVideoElement(c.mediaUrl!, c.id);
+      this.desiredTime.set(element,Math.max(0,sourceTime(c,time)));
+      const target = Math.min(Math.max(0, element.duration - .001), sourceTime(c,time));
+      if (Number.isFinite(target) && Math.abs(element.currentTime - target) > .015) { element.currentTime = target; await this.waitFor(element, 'seeked', () => !element.seeking); }
+    }));
+    await Promise.all(images.filter(c => c.mediaUrl).map(c => this.getImageElement(c.mediaUrl!).decode().catch(() => {})));
+    if(shouldRender())this.renderFrame(canvas, time, videos, effects, images, subtitles);
+  }
+  public renderFrame(canvas: HTMLCanvasElement, time: number, videos: VideoClipData[], effects: EffectClipData[], images: ImageClipData[], subtitles: SubtitleData[]) {
+    const ctx=canvas.getContext('2d');if(!ctx)return;
+    const width=canvas.width,height=canvas.height;
+    // Keep the last composed frame during decoder handoff, never paint a transient black canvas.
+    for(const c of videos.filter(c=>c.mediaUrl&&time>=c.startTime&&time<c.startTime+c.duration)){const source=this.getVideoElement(c.mediaUrl!,c.id);if(!source.error&&(source.readyState<2||source.seeking))return;}
+    ctx.clearRect(0,0,width,height);ctx.fillStyle='black';ctx.fillRect(0,0,width,height);
+    const global=effects.filter(e=>time>=e.startTime && time<e.startTime+e.duration);
+    const active=[...videos.map(c=>({...c,kind:'video'})),...images.map(c=>({...c,kind:'image'}))].filter(c=>time>=c.startTime && time<c.startTime+c.duration).sort((a,b)=>a.startTime-b.startTime || (a.layer||0)-(b.layer||0));
+    for(const clip of active) {
+      if(!clip.mediaUrl)continue;
+      const source=clip.kind==='video'?this.getVideoElement(clip.mediaUrl,clip.id):this.getImageElement(clip.mediaUrl);
+      const w=source instanceof HTMLVideoElement?source.videoWidth:source.naturalWidth;
+      const h=source instanceof HTMLVideoElement?source.videoHeight:source.naturalHeight;
+      if(!w || !h || (source instanceof HTMLVideoElement && source.readyState<2))continue;
+      let frame=this.frameCache.get(clip.id);
+      if(!frame){frame=document.createElement('canvas');this.frameCache.set(clip.id,frame);}
+      if(frame.width!==width || frame.height!==height){frame.width=width;frame.height=height;}
+      const target=frame.getContext('2d',{willReadFrequently:true})!;
+      target.clearRect(0,0,width,height);
+      const settings:VisualSettings=clip;
+      const ratio=Math.min(width/w,height/h);
+      target.drawImage(source,(width-w*ratio)/2,(height-h*ratio)/2,w*ratio,h*ratio);
+      const color=colorSettings(settings);
+      if(Object.values(color).some(Boolean) || hasGrade(settings.colorGrade) || settings.effects?.includes('glitch')) {
+        const pixels=target.getImageData(0,0,width,height);adjustPixels(pixels.data,settings);applyGrade(pixels.data,settings.colorGrade);
+        if(color.sharpness || (!settings.colorGrade?.bypass && settings.colorGrade?.sharpness)) {
+          const original=new Uint8ClampedArray(pixels.data),amount=Math.min(100,color.sharpness+(settings.colorGrade?.bypass?0:settings.colorGrade?.sharpness||0))/100*1.5;
+          for(let y=1;y<height-1;y++)for(let x=1;x<width-1;x++)for(let c=0;c<3;c++) {
+            const i=(y*width+x)*4+c;let blur=0;
+            for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)blur+=original[i+(dy*width+dx)*4]*(dx===0?2:1)*(dy===0?2:1)/16;
+            pixels.data[i]=original[i]+amount*(original[i]-blur);
           }
         }
-      }
-
-      if (!renderedRealVideo) {
-        // Fallback indicator while video frame decodes
-        ctx.fillStyle = '#111827';
-        ctx.fillRect(0, 0, width, height);
-
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = 'bold 20px "Plus Jakarta Sans", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`▶ ${activeVideo.name}`, width / 2, height / 2 - 12);
-
-        ctx.font = '13px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#94a3b8';
-        ctx.fillText(`Fotogramma in caricamento (${timeSec.toFixed(1)}s)`, width / 2, height / 2 + 16);
-      }
-
-      // Draw effect badge if active
-      if (activeEffect) {
-        ctx.fillStyle = 'rgba(203, 92, 91, 0.9)';
-        ctx.fillRect(width / 2 - 130, 20, 260, 26);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '600 12px "Plus Jakarta Sans", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`FX: ${activeEffect.name} (${Math.round(effectIntensity * 100)}%)`, width / 2, 37);
-      }
-    } else if (activeImage) {
-      const alpha = Math.max(0, Math.min(1, (activeImage.transparency ?? 100) / 100));
-      ctx.globalAlpha = alpha;
-
-      let renderedRealImage = false;
-
-      if (activeImage.mediaUrl) {
-        const imgEl = this.getImageElement(activeImage.mediaUrl);
-        if (imgEl.complete && imgEl.naturalWidth > 0) {
-          const iw = imgEl.naturalWidth;
-          const ih = imgEl.naturalHeight;
-          const iAspect = iw / ih;
-          const cAspect = width / height;
-
-          let dw = width;
-          let dh = height;
-          let dx = 0;
-          let dy = 0;
-
-          if (iAspect > cAspect) {
-            dh = width / iAspect;
-            dy = (height - dh) / 2;
-          } else {
-            dw = height * iAspect;
-            dx = (width - dw) / 2;
+        if(settings.effects?.includes('glitch')) {
+          const original=new Uint8ClampedArray(pixels.data),shift=Math.max(1,Math.round(width*.004));
+          for(let y=0;y<height;y++)for(let x=0;x<width;x++) {
+            const i=(y*width+x)*4;
+            pixels.data[i]=original[(y*width+Math.max(0,x-shift))*4];pixels.data[i+2]=original[(y*width+Math.min(width-1,x+shift))*4+2];
           }
-
-          ctx.drawImage(imgEl, dx, dy, dw, dh);
-          renderedRealImage = true;
         }
+        target.putImageData(pixels,0,0);
       }
-
-      if (!renderedRealImage) {
-        ctx.fillStyle = '#1c1917';
-        ctx.fillRect(30, 20, width - 60, height - 40);
-
-        ctx.fillStyle = '#eab308';
-        ctx.font = 'bold 20px "Plus Jakarta Sans", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`📷 ${activeImage.name}`, width / 2, height / 2);
+      const elapsed=time-clip.startTime,motion=motionAt({...settings,offset:0},elapsed);
+      ctx.save();
+      ctx.globalAlpha=clipAlpha(settings,elapsed);
+      if(settings.effects?.includes('blur'))ctx.filter=`blur(${height/90*effectAmount(settings)}px)`;
+      ctx.translate(width/2-motion.x*width,height/2-motion.y*height);ctx.scale(motion.zoom,motion.zoom);
+      if(settings.mask?.closed&&settings.mask.enabled!==false){
+        const masked=document.createElement('canvas');masked.width=width;masked.height=height;const mc=masked.getContext('2d')!;
+        const alpha=maskAlpha(settings.mask,width,height),maskCanvas=document.createElement('canvas');maskCanvas.width=width;maskCanvas.height=height;const ma=maskCanvas.getContext('2d')!,pixels=ma.createImageData(width,height);for(let i=0;i<alpha.length;i++){pixels.data[i*4+3]=alpha[i];}ma.putImageData(pixels,0,0);
+        // Mask uses final stage coordinates, independent of a clip's zoom/shake transform.
+        mc.save();mc.translate(width/2-motion.x*width,height/2-motion.y*height);mc.scale(motion.zoom,motion.zoom);mc.filter=ctx.filter;mc.drawImage(frame,-width/2,-height/2);mc.restore();mc.globalCompositeOperation='destination-in';mc.drawImage(maskCanvas,0,0);
+        ctx.restore();ctx.save();ctx.globalAlpha=clipAlpha(settings,elapsed);ctx.drawImage(masked,0,0);ctx.restore();
+      }else{ctx.drawImage(frame,-width/2,-height/2);ctx.restore();}
+    }
+    for(const effect of global) {
+      if(effect.intensity===0)continue;
+      const elapsed=time-effect.startTime;
+      if(effect.effectType==='dissolvenza') {ctx.save();ctx.globalAlpha=1-effectMix(effect,elapsed,effect.effectType);ctx.fillStyle='black';ctx.fillRect(0,0,width,height);ctx.restore();continue;}
+      const settings:VisualSettings={...effect,effects:[effect.effectType as any]};
+      let frame=this.frameCache.get('effect:'+effect.id);
+      if(!frame){frame=document.createElement('canvas');this.frameCache.set('effect:'+effect.id,frame);}
+      frame.width=width;frame.height=height;
+      const target=frame.getContext('2d',{willReadFrequently:true})!;target.drawImage(canvas,0,0);
+      const pixels=target.getImageData(0,0,width,height);adjustPixels(pixels.data,settings);
+      if(effect.effectType==='glitch') {
+        const original=new Uint8ClampedArray(pixels.data),shift=Math.round(width*.004*effectAmount(effect));
+        for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=(y*width+x)*4;pixels.data[i]=original[(y*width+Math.max(0,x-shift))*4];pixels.data[i+2]=original[(y*width+Math.min(width-1,x+shift))*4+2];}
       }
-    } else {
-      // Empty timeline
-      ctx.fillStyle = '#0b0f19';
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.fillStyle = '#475569';
-      ctx.font = '14px "Plus Jakarta Sans", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Nessuna clip video o immagine a questo timestamp', width / 2, height / 2 - 10);
-      ctx.font = '12px "JetBrains Mono", monospace';
-      ctx.fillStyle = '#334155';
-      ctx.fillText('Trascina o posiziona una clip video nella traccia blu', width / 2, height / 2 + 15);
+      target.putImageData(pixels,0,0);
+      const motion=motionAt(settings,elapsed);
+      ctx.save();ctx.globalAlpha=effectMix(effect,elapsed,effect.effectType);
+      if(effect.effectType==='blur')ctx.filter=`blur(${height/90*effectAmount(effect)}px)`;
+      ctx.translate(width/2-motion.x*width,height/2-motion.y*height);ctx.scale(motion.zoom,motion.zoom);ctx.drawImage(frame,-width/2,-height/2);ctx.restore();
     }
-
-    ctx.restore();
-
-    // Render subtitle if active
-    const activeSub = subtitles.find(s => timeSec >= s.startTime && timeSec <= s.endTime);
-    if (activeSub) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      ctx.font = 'bold 15px "Plus Jakarta Sans", sans-serif';
-      const textMetrics = ctx.measureText(activeSub.text);
-      const subWidth = Math.min(width - 40, textMetrics.width + 32);
-      ctx.fillRect((width - subWidth) / 2, height - 56, subWidth, 32);
-
-      ctx.fillStyle = '#facc15';
-      ctx.textAlign = 'center';
-      ctx.fillText(activeSub.text, width / 2, height - 35);
+    for(const subtitle of subtitles.filter(s=>time>=s.startTime && time<s.endTime)) {
+      ctx.save();ctx.globalAlpha=clipAlpha({...subtitle,duration:subtitle.endTime-subtitle.startTime},time-subtitle.startTime);
+      if(subtitle.style==='karaoke'&&subtitle.words?.length){const layout=karaokeLayout({...subtitle,id:'preview'},width,height);ctx.font=`bold ${layout.font}px monospace`;ctx.textAlign='left';ctx.textBaseline='top';for(const word of layout.words){if(time>=word.startTime&&time<word.endTime){ctx.fillStyle='#087f8c';ctx.fillRect(word.x-4,word.y-4,ctx.measureText(word.text).width+8,layout.font+8);}ctx.fillStyle='white';ctx.fillText(word.text,word.x,word.y);}ctx.restore();continue;}
+      const font=Math.round(height/24),lines=subtitle.text.split('\n');
+      ctx.font=`bold ${font}px sans-serif`;ctx.textAlign='center';
+      const w=Math.min(width-20,Math.max(...lines.map(line=>ctx.measureText(line).width))+16),h=lines.length*(font+4),row=(subtitle.row||0)*font*2;
+      ctx.fillStyle='#000b';ctx.fillRect((width-w)/2,height-h-24-row,w,h+10);ctx.fillStyle='yellow';
+      lines.forEach((line,i)=>ctx.fillText(line,width/2,height-h-14-row+(i+1)*(font+4),width-24));ctx.restore();
     }
+  }
+  public pauseAll() { this.mixer?.configure([],undefined,false,true); this.videoCache.forEach(v => v.pause()); this.audioCache.forEach(a => a.pause()); }
+  public dispose() {
+    this.pauseAll(); this.onFrameReady = null;
+    for (const element of [...this.videoCache.values(), ...this.audioCache.values()]) { element.removeAttribute('src'); element.load(); }
+    this.videoCache.clear(); this.audioCache.clear(); this.imageCache.clear(); this.frameCache.clear(); this.gains.clear();this.gainRoutes.clear();this.warming.clear();this.mixer=null;
+    if (this.audioContext) void this.audioContext.close(); this.audioContext = null;
   }
 }
-
 export const playbackEngine = new PlaybackEngine();

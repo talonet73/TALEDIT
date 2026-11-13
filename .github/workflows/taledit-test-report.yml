@@ -1,0 +1,57 @@
+name: TALEDIT browser test diagnostics
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Windows build run containing the browser report
+        required: true
+        default: '43301553043'
+  push:
+    branches: [codex/taledit-export-mcp-whisper]
+    paths: ['.github/workflows/taledit-test-report.yml']
+permissions:
+  actions: read
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: TALEDIT-installed-player-tests
+          run-id: ${{ inputs.run_id || '43301553043' }}
+          github-token: ${{ github.token }}
+          path: report
+      - name: Expose saved browser failures as annotations
+        shell: python
+        run: |
+          import base64, io, json, os, pathlib, re, zipfile
+          import sys, traceback
+          def failure(kind, error, tb):
+              detail = ''.join(traceback.format_exception(kind, error, tb))
+              print('::error::' + detail.replace('%', '%25').replace('\n', '%0A'), flush=True)
+          sys.excepthook = failure
+          root = pathlib.Path('report')
+          index = next(root.rglob('index.html'))
+          content = index.read_text(encoding='utf-8')
+          encoded = re.search(r'data:application/zip;base64,([A-Za-z0-9+/=]+)', content)
+          assert encoded, 'Embedded Playwright report not found'
+          archive = zipfile.ZipFile(io.BytesIO(base64.b64decode(encoded.group(1))))
+          def annotate(value):
+              text = value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print('::notice::' + text, flush=True)
+          for name in archive.namelist():
+              if not name.endswith('.json'): continue
+              data = json.loads(archive.read(name))
+              def visit(value):
+                  if isinstance(value, dict):
+                      if 'error' in value and isinstance(value['error'], dict):
+                          annotate(json.dumps(value, ensure_ascii=False)[:20000])
+                      for key, child in value.items():
+                          if key == 'errors' and isinstance(child, list) and child:
+                              annotate(json.dumps(child, ensure_ascii=False)[:20000])
+                          visit(child)
+                  elif isinstance(value, list):
+                      for child in value: visit(child)
+              visit(data)
+          for file in root.rglob('error-context.md'):
+              annotate(str(file) + '\n' + file.read_text(encoding='utf-8')[:14000])

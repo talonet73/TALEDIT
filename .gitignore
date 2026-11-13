@@ -1,7 +1,15 @@
 node_modules/
 dist/
-release/
-desktop/server.mjs
 .env
-.env.local
-*.log
+.env.*
+!.env.example
+media_downloads/*
+!media_downloads/.gitkeep
+test-results/
+playwright-report/
+build/
+__pycache__/
+
+# Generated output from earlier desktop builds
+release/
+desktop/

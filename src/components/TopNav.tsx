@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  FolderOpen,
+  Camera, FolderOpen, Bot, Plug, Unplug, WandSparkles,Blend, Captions, SlidersHorizontal, ScanLine, ScissorsLineDashed, PenTool,
   Save,
   PlusSquare,
   Share2,
@@ -21,8 +21,14 @@ import {
 
 interface TopNavProps {
   claudeConnected: boolean;
+  hasSelection: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
+  canPaste: boolean;
   onToggleClaude: () => void;
   onOpenClaudeDialog: () => void;
+  onOpenChatGPT: () => void;
+  onFullscreen: () => void;
   onCut: () => void;
   onDelete: () => void;
   onUndo: () => void;
@@ -33,6 +39,8 @@ interface TopNavProps {
   onImport: () => void;
   onSave: () => void;
   onExport: () => void;
+  onScreenshot:()=>void;
+  canScreenshot:boolean;
   onAddMarker: () => void;
   markerCount?: number;
   activeTab: string;
@@ -43,8 +51,11 @@ interface TopNavProps {
 
 export const TopNav: React.FC<TopNavProps> = ({
   claudeConnected,
+  hasSelection, canUndo, canRedo, canPaste,
   onToggleClaude,
   onOpenClaudeDialog,
+  onOpenChatGPT,
+  onFullscreen,
   onCut,
   onDelete,
   onUndo,
@@ -54,7 +65,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenProject,
   onImport,
   onSave,
-  onExport,
+  onExport,onScreenshot,canScreenshot,
   onAddMarker,
   markerCount = 0,
   activeTab,
@@ -65,7 +76,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
   const menuItems = ['File', 'Edit', 'View', 'Help'];
-  const tabs = ['Effects', 'Transitions', 'Captions', 'Adjustment'];
+  const tabs = [{label:'Effects',icon:WandSparkles},{label:'Transitions',icon:Blend},{label:'Captions',icon:Captions},{label:'Adjustment',icon:SlidersHorizontal},{label:'BG Remover',icon:ScanLine},{label:'AI Cut',icon:ScissorsLineDashed},{label:'Pen Mask',icon:PenTool}];
 
   return (
     <div className="bg-[#0b0f19] border-b border-[#1e293b] select-none text-[#e2e8f0] text-xs">
@@ -114,16 +125,16 @@ export const TopNav: React.FC<TopNavProps> = ({
                     )}
                     {menu === 'Edit' && (
                       <>
-                        <button onClick={() => { onUndo(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Indietro (Undo)</button>
-                        <button onClick={() => { onRedo(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Avanti (Redo)</button>
-                        <button onClick={() => { onCut(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Taglia (Cut al playhead)</button>
-                        <button onClick={() => { onDelete(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Elimina Selezionato</button>
+                        <button disabled={!canUndo} onClick={() => { onUndo(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Indietro (Undo)</button>
+                        <button disabled={!canRedo} onClick={() => { onRedo(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Avanti (Redo)</button>
+                        <button disabled={!hasSelection} onClick={() => { onCut(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Taglia (Cut al playhead)</button>
+                        <button disabled={!hasSelection} onClick={() => { onDelete(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Elimina Selezionato</button>
                       </>
                     )}
                     {menu === 'View' && (
                       <>
                         <button onClick={() => { onOpenClaudeDialog(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Console Claude DT MCP</button>
-                        <button onClick={() => setActiveMenu(null)} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Schermo Intero</button>
+                        <button onClick={() => { onFullscreen(); setActiveMenu(null); }} className="w-full text-left px-3 py-1.5 hover:bg-[#1e293b]">Schermo Intero</button>
                       </>
                     )}
                     {menu === 'Help' && (
@@ -143,19 +154,20 @@ export const TopNav: React.FC<TopNavProps> = ({
         <div className="flex items-center gap-3">
           <div className="text-[11px] text-gray-400 flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${claudeConnected ? 'bg-emerald-400' : 'bg-gray-500'}`} />
-            <span>MCP Protocol: {claudeConnected ? 'Attivo' : 'Disconnesso'}</span>
+            <span>MCP Protocol: {claudeConnected ? 'Attivo (Port 3000)' : 'Disconnesso'}</span>
           </div>
         </div>
       </div>
 
       {/* Main Action Tool Bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#0e1424] overflow-x-auto gap-2">
+        <button onClick={onOpenChatGPT} title="ChatGPT MCP" className="flex items-center gap-2 px-3 py-2 rounded bg-emerald-950 text-emerald-300 hover:bg-emerald-900 whitespace-nowrap font-bold"><Bot aria-hidden="true" size={16}/>ChatGPT MCP</button>
         {/* Actions Left */}
         <div className="flex items-center gap-1">
           <button
             onClick={onOpenProject}
             title="Apri Progetto (.tal, .json)"
-            className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors cursor-pointer"
+            className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
           >
             <FolderOpen className="w-4 h-4 mb-0.5 text-amber-400" />
             <span className="text-[10px]">Apri</span>
@@ -164,7 +176,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           <button
             onClick={onSave}
             title="Salva Progetto (.tal)"
-            className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors cursor-pointer"
+            className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
           >
             <Save className="w-4 h-4 mb-0.5" />
             <span className="text-[10px]">Salva</span>
@@ -188,9 +200,11 @@ export const TopNav: React.FC<TopNavProps> = ({
             <span className="text-[10px]">Esporta</span>
           </button>
 
+          <button onClick={onScreenshot} disabled={!canScreenshot} title="Screenshot del fotogramma al cursore" className="flex flex-col items-center px-2 py-1 rounded hover:bg-slate-700 disabled:opacity-40"><Camera className="w-4 h-4 mb-0.5"/><span className="text-[10px]">Screenshot</span></button>
           <div className="h-6 w-[1px] bg-[#1e293b] mx-1" />
 
           <button
+            disabled={!canUndo}
             onClick={onUndo}
             title="Indietro (Undo)"
             className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors"
@@ -200,6 +214,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
 
           <button
+            disabled={!canRedo}
             onClick={onRedo}
             title="Avanti (Redo)"
             className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors"
@@ -209,6 +224,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
 
           <button
+            disabled={!hasSelection}
             onClick={onCut}
             title="Taglia clip al playhead"
             className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors"
@@ -218,6 +234,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
 
           <button
+            disabled={!hasSelection}
             onClick={onDelete}
             title="Elimina clip selezionata"
             className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors"
@@ -243,6 +260,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
 
           <button
+            disabled={!hasSelection}
             onClick={onCopy}
             title="Copia clip"
             className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors"
@@ -252,6 +270,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           </button>
 
           <button
+            disabled={!canPaste}
             onClick={onPaste}
             title="Incolla clip"
             className="flex flex-col items-center justify-center px-2 py-1 rounded hover:bg-[#1b263b] text-gray-300 hover:text-white transition-colors"
@@ -264,17 +283,20 @@ export const TopNav: React.FC<TopNavProps> = ({
 
           {/* Mode Tabs */}
           <div className="flex items-center gap-1">
-            {tabs.map(tab => (
+            {tabs.map(({label:tab,icon:Icon}) => (
               <button
                 key={tab}
+                aria-expanded={activeTab === tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-3 py-1 rounded text-xs transition-colors ${
+                title={tab}
+                className={`flex flex-col items-center justify-center shrink-0 min-w-[62px] px-2 py-1 rounded text-xs transition-colors ${
                   activeTab === tab
                     ? 'bg-[#1e293b] text-cyan-400 font-semibold border border-[#334155]'
                     : 'text-gray-400 hover:text-white hover:bg-[#162032]'
                 }`}
               >
-                {tab}
+                <Icon aria-hidden="true" className="w-4 h-4 mb-0.5"/>
+                <span className="text-[10px] whitespace-nowrap">{tab}</span>
               </button>
             ))}
           </div>
@@ -300,12 +322,12 @@ export const TopNav: React.FC<TopNavProps> = ({
             {/* Manual Switch */}
             <button
               onClick={onToggleClaude}
-              className={`px-2 py-1 text-[11px] font-bold rounded transition-colors ${
+              className={`flex items-center gap-1 px-2 py-1 text-[11px] font-bold rounded transition-colors ${
                 claudeConnected ? 'text-emerald-400 hover:bg-emerald-950/30' : 'text-gray-400 hover:bg-gray-800'
               }`}
               title="Accendi o spegni manualmente il collegamento MCP con Claude"
             >
-              {claudeConnected ? 'DISCONNETTI' : 'COLLEGA'}
+              {claudeConnected?<Unplug aria-hidden="true" size={14}/>:<Plug aria-hidden="true" size={14}/>} {claudeConnected ? 'DISCONNETTI' : 'COLLEGA'}
             </button>
           </div>
 
