@@ -55,3 +55,14 @@ Le prove Windows sull'installer sono eseguite dalla pipeline e bloccano la Relea
 in caso di errore; l'avvio Linux non sostituisce queste verifiche.
 
 ![Finestra Electron con interfaccia completa e logo](restored-complete-interface.png)
+
+## Verifica Windows aggiuntiva
+
+La prima esecuzione dei controlli sull'app installata ha superato 33 prove e ha
+bloccato la Release per una misura audio sotto soglia su Edge dopo il salto finale
+nel MOV da 4433,7 secondi. La stessa prova, ripetuta separatamente su Windows con
+Edge e lo stesso FFmpeg bloccato, è passata senza cambiare sorgenti o soglie.
+Sono state aggiunte informazioni diagnostiche sui decoder per eventuali ricorrenze.
+L'intera verifica dell'installer viene rieseguita e continua a bloccare la Release
+in caso di errore. L'installer candidato viene conservato come artefatto anche in
+caso di test falliti, distinguendolo dalla Release pubblicata dopo i controlli.
