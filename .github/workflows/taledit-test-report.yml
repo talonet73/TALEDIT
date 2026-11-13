@@ -5,9 +5,9 @@ on:
       run_id:
         description: Windows build run containing the browser report
         required: true
-        default: '43301553043'
+        default: '43436387460'
   push:
-    branches: [codex/taledit-export-mcp-whisper]
+    branches: [main, codex/taledit-export-mcp-whisper]
     paths: ['.github/workflows/taledit-test-report.yml']
 permissions:
   actions: read
@@ -18,7 +18,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: TALEDIT-installed-player-tests
-          run-id: ${{ inputs.run_id || '43301553043' }}
+          run-id: ${{ inputs.run_id || '43436387460' }}
           github-token: ${{ github.token }}
           path: report
       - name: Expose saved browser failures as annotations
