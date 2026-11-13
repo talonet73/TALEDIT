@@ -72,9 +72,9 @@ export const TopNav: React.FC<TopNavProps> = ({
       {/* Top Menu Bar */}
       <div className="flex items-center justify-between px-3 py-1 border-b border-[#182234]">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1.5 font-bold tracking-wider text-sm text-cyan-400">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
-            TALEDIT
+          <div className="flex items-center gap-2.5 font-bold tracking-wide text-xl text-[#00e6bc] shrink-0">
+            <img src="/taledit-logo.png" alt="Logo TALedit" width={44} height={44} className="w-11 h-11 rounded-xl object-contain" draggable={false} />
+            <span>TALedit</span>
           </div>
           <div className="flex items-center gap-1">
             {menuItems.map(menu => (
@@ -143,7 +143,7 @@ export const TopNav: React.FC<TopNavProps> = ({
         <div className="flex items-center gap-3">
           <div className="text-[11px] text-gray-400 flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${claudeConnected ? 'bg-emerald-400' : 'bg-gray-500'}`} />
-            <span>MCP Protocol: {claudeConnected ? 'Attivo (Port 3000)' : 'Disconnesso'}</span>
+            <span>MCP Protocol: {claudeConnected ? 'Attivo' : 'Disconnesso'}</span>
           </div>
         </div>
       </div>

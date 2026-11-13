@@ -1,5 +1,4 @@
 import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -9,15 +8,17 @@ import util from 'util';
 const execPromise = util.promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DOWNLOADS_DIR = path.resolve(__dirname, 'media_downloads');
+const DOWNLOADS_DIR = process.env.TALEDIT_DATA_DIR || path.resolve(__dirname, 'media_downloads');
+const STATIC_DIR = process.env.TALEDIT_STATIC_DIR || path.resolve(__dirname, 'dist');
+const FFMPEG = process.env.TALEDIT_FFMPEG || 'ffmpeg';
 
 if (!fs.existsSync(DOWNLOADS_DIR)) {
   fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 }
 
-async function startServer() {
+export async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = Number(process.env.PORT ?? 3000);
 
   app.use(express.json());
 
@@ -334,7 +335,7 @@ async function startServer() {
 
         if (audioProducing.length === 0) {
           // Generate clean silence - NEVER AN OSCILLATOR DRONE!
-          const cmd = `ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t ${safeDuration} ${format === 'wav' ? '-c:a pcm_s16le -ar 44100' : `-c:a libmp3lame -b:a ${audioKbps}k`} "${outFilePath}"`;
+          const cmd = `"${FFMPEG}" -y -f lavfi -i anullsrc=r=44100:cl=stereo -t ${safeDuration} ${format === 'wav' ? '-c:a pcm_s16le -ar 44100' : `-c:a libmp3lame -b:a ${audioKbps}k`} "${outFilePath}"`;
           await execPromise(cmd);
         } else {
           let inputsStr = '';
@@ -363,7 +364,7 @@ async function startServer() {
             ? '-c:a pcm_s16le -ar 44100'
             : `-c:a libmp3lame -b:a ${audioKbps}k`;
 
-          const cmd = `ffmpeg -y ${inputsStr} -filter_complex "${filterParts.join(';')}" -map "[aout]" -t ${safeDuration} ${codecArgs} "${outFilePath}"`;
+          const cmd = `"${FFMPEG}" -y ${inputsStr} -filter_complex "${filterParts.join(';')}" -map "[aout]" -t ${safeDuration} ${codecArgs} "${outFilePath}"`;
           await execPromise(cmd);
         }
       } else {
@@ -458,7 +459,7 @@ async function startServer() {
           codecArgs = `-c:v libx264 -pix_fmt yuv420p -b:v ${videoKbps}k -c:a mp3 -b:a ${audioKbps}k`;
         }
 
-        const cmd = `ffmpeg -y ${inputsStr} -filter_complex "${filterComplex}" -map "[${finalVideoTag}]" ${audioMap} -t ${safeDuration} ${codecArgs} "${outFilePath}"`;
+        const cmd = `"${FFMPEG}" -y ${inputsStr} -filter_complex "${filterComplex}" -map "[${finalVideoTag}]" ${audioMap} -t ${safeDuration} ${codecArgs} "${outFilePath}"`;
         await execPromise(cmd);
       }
 
@@ -514,23 +515,28 @@ async function startServer() {
   // Vite integration
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.use(express.static(STATIC_DIR));
     app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.resolve(__dirname, 'dist/index.html'));
+      res.sendFile(path.join(STATIC_DIR, 'index.html'));
     });
   }
 
-  app.listen(PORT, () => {
-    console.log(`[TALEDIT Server] Running on http://localhost:${PORT}`);
+  return new Promise<import('http').Server>((resolve, reject) => {
+    const server = app.listen(PORT, process.env.TALEDIT_HOST || '0.0.0.0', () => resolve(server));
+    server.once('error', reject);
   });
 }
 
-startServer().catch(err => {
-  console.error('[TALEDIT Server] Error starting server:', err);
-});
+if (process.env.TALEDIT_DESKTOP !== '1') {
+  startServer().catch(err => {
+    console.error('[TALEDIT Server] Error starting server:', err);
+    process.exitCode = 1;
+  });
+}
