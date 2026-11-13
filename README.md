@@ -29,9 +29,9 @@ I media importati e le esportazioni vengono salvati in `%APPDATA%/TALedit/media_
 
 ### Scaricare l'installer
 
-Su GitHub aprire **Actions → Windows installer**, scegliere una build riuscita e
-scaricare l'artefatto **TALedit-Windows-Installer**. Estrarre lo ZIP ed eseguire
-`TALedit-Setup-1.0.0.exe`. L'installazione crea i collegamenti nel menu Start e sul desktop.
+Scaricare direttamente [TALedit-Setup-1.0.0.exe](https://github.com/talonet73/TALEDIT/releases/latest/download/TALedit-Setup-1.0.0.exe).
+Ogni build Windows riuscita pubblica l'installer nelle Release di GitHub.
+Eseguire il file scaricato: l'installazione crea i collegamenti nel menu Start e sul desktop.
 L'installer non è firmato con un certificato di firma del codice.
 
 ### Sviluppo e compilazione

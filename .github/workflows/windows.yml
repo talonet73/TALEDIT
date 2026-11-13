@@ -4,7 +4,7 @@ on:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -25,3 +25,16 @@ jobs:
           name: TALedit-Windows-Installer
           path: release/TALedit-Setup-*.exe
           if-no-files-found: error
+      - name: Publish Windows installer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release create "desktop-v${VERSION}-build.${GITHUB_RUN_NUMBER}" \
+            release/TALedit-Setup-*.exe \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "TALedit ${VERSION} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "Installer Windows a 64 bit. Include logo TALedit, collegamenti desktop e menu Start, finestra desktop dedicata e FFmpeg. Installer non firmato." \
+            --latest
