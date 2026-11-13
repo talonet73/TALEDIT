@@ -66,3 +66,15 @@ Sono state aggiunte informazioni diagnostiche sui decoder per eventuali ricorren
 L'intera verifica dell'installer viene rieseguita e continua a bloccare la Release
 in caso di errore. L'installer candidato viene conservato come artefatto anche in
 caso di test falliti, distinguendolo dalla Release pubblicata dopo i controlli.
+
+## Esito finale Windows
+
+La verifica completa dell'installer costruito da `ddf08dd25657` è passata:
+installazione effettiva e inventario SHA256, runtime privati, inferenza Whisper e
+U2NetP, import/export, screenshot, prove in Chrome ed Edge, finestra Electron con
+logo e comandi completi, chiusura e disinstallazione con conservazione dei dati.
+Le soglie audio e i controlli della prova inizialmente fallita sono rimasti invariati.
+
+[Build e verifiche Windows](https://github.com/talonet73/TALEDIT/actions/runs/43443653992)
+
+[Installer della build verificata](https://github.com/talonet73/TALEDIT/releases/download/taledit-windows-ddf08dd25657/TALEDIT-Setup.exe)
