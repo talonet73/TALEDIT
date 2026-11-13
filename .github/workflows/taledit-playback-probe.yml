@@ -1,0 +1,35 @@
+name: TALedit Windows playback probe
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/taledit-playback-probe.yml', 'playwright.probe.config.ts', 'tests/browser/preview-av.spec.ts']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  playback:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Prepare the same pinned FFmpeg as the offline installer
+        shell: pwsh
+        run: |
+          $asset = (Get-Content packaging/windows/assets.lock.json | ConvertFrom-Json).downloads.'ffmpeg.zip'
+          Invoke-WebRequest $asset.url -OutFile "$env:RUNNER_TEMP\ffmpeg.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP\ffmpeg.zip" -Algorithm SHA256).Hash.ToLower() -ne $asset.sha256) { throw 'FFmpeg checksum mismatch' }
+          7z x "$env:RUNNER_TEMP\ffmpeg.zip" "-o$env:RUNNER_TEMP\ffmpeg" -y | Out-Null
+          (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName >> $env:GITHUB_PATH
+      - run: npx playwright install msedge
+      - run: npm run build
+      - run: npx playwright test --config playwright.probe.config.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TALedit-Windows-playback-probe
+          path: test-results/

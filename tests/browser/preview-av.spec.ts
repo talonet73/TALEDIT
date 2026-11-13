@@ -13,8 +13,8 @@ for(const [channels,rate,duration,hevc] of [[2,48000,8,0],[8,48000,8,0],[2,96000
  if(hevc)execFileSync('ffmpeg',['-v','error','-y','-f','lavfi','-i','color=red:s=3840x2160:r=186213/3125:d=4','-f','lavfi','-i','aevalsrc=0.1*sin(2*PI*440*t)|0.1*sin(2*PI*440*t):s=48000:d=4','-c:v','libx265','-preset','ultrafast','-x265-params','pools=4:frame-threads=2','-pix_fmt',hevc===10?'yuv420p10le':'yuv420p','-tag:v','hvc1','-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709','-color_range','tv','-c:a','aac','-shortest',file],{stdio:'pipe'});
  else if(duration>1000&&process.env.LONG_MOV_FIXTURE)fs.copyFileSync(process.env.LONG_MOV_FIXTURE,file);else execFileSync('ffmpeg',['-v','error','-y','-f','lavfi','-i',`color=red:s=160x90:r=${duration>1000?1:60}:d=${duration}${duration>1000?",drawbox=c=blue:t=fill:enable='between(t,60,1799)',drawbox=c=lime:t=fill:enable='between(t,1800,4399)',drawbox=c=yellow:t=fill:enable='gte(t,4400)'":''}`,'-f','lavfi','-i',`aevalsrc=${sound}:s=${rate}:d=${duration}`,'-c:v','libx264','-preset','ultrafast','-threads','2','-pix_fmt','yuv420p','-c:a','pcm_s24le','-shortest',file]);
  await page.addInitScript(()=>{
-  (window as any).__sound=[];(window as any).__media=[];
-  const source=AudioContext.prototype.createMediaElementSource;AudioContext.prototype.createMediaElementSource=function(element:HTMLMediaElement){(window as any).__media.push(element);return source.call(this,element);};
+  (window as any).__sound=[];(window as any).__media=[];(window as any).__mediaEvents=[];
+  const source=AudioContext.prototype.createMediaElementSource;AudioContext.prototype.createMediaElementSource=function(element:HTMLMediaElement){(window as any).__media.push(element);for(const event of ['seeking','seeked','waiting','playing','stalled'])element.addEventListener(event,()=>{const events=(window as any).__mediaEvents;events.push({event,at:performance.now(),time:element.currentTime,ready:element.readyState});if(events.length>200)events.shift();});return source.call(this,element);};
   const connect=AudioNode.prototype.connect;
   AudioNode.prototype.connect=function(this:AudioNode,destination:any,...args:any[]){
    const result=(connect as any).call(this,destination,...args);
@@ -42,6 +42,11 @@ for(const [channels,rate,duration,hevc] of [[2,48000,8,0],[8,48000,8,0],[2,96000
   await expect.poll(async()=>page.evaluate((t:number)=>(window as any).__media.some((m:HTMLMediaElement)=>!m.paused&&!m.error&&m.currentTime>t+.1&&m.currentTime<t+3),target),{timeout:10000}).toBe(true);
   await expect.poll(async()=>page.evaluate(()=>Math.max(0,...(window as any).__sound.map((a:AnalyserNode)=>{const pcm=new Float32Array(a.fftSize);a.getFloatTimeDomainData(pcm);return Math.sqrt(pcm.reduce((n,v)=>n+v*v,0)/pcm.length);}))),{timeout:10000}).toBeGreaterThan(.02);
  }
+ }catch(error){
+  const diagnostics=await page.evaluate(()=>({media:(window as any).__media?.map((m:HTMLMediaElement)=>({src:m.currentSrc,time:m.currentTime,paused:m.paused,seeking:m.seeking,ready:m.readyState,muted:m.muted,volume:m.volume,error:m.error?.message})),audio:(window as any).__sound?.map((a:AnalyserNode)=>{const pcm=new Float32Array(a.fftSize);a.getFloatTimeDomainData(pcm);return {rms:Math.sqrt(pcm.reduce((n,v)=>n+v*v,0)/pcm.length),context:a.context.state,time:a.context.currentTime,sampleRate:a.context.sampleRate};}),events:(window as any).__mediaEvents}));
+  console.log('PLAYBACK_DIAGNOSTICS '+JSON.stringify(diagnostics));
+  await test.info().attach('playback-diagnostics',{body:JSON.stringify(diagnostics,null,2),contentType:'application/json'});
+  throw error;
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
